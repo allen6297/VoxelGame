@@ -17,3 +17,6 @@ CMakeCache.txt
 *.so
 *.dll
 *.exe
+
+# Macos
+/.DS_Store/
