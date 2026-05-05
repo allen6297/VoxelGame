@@ -10,13 +10,15 @@
 #include <string>
 #include <thread>
 
-#include "data/GameData.hpp"
-#include "game/Game.hpp"
-#include "network/NetworkManager.hpp"
-#include "pack/AssetPackManager.hpp"
-#include "pack/PackManager.hpp"
-#include "pack/ScriptManager.hpp"
-#include "ui/GameUI.hpp"
+#include "common/data/GameData.hpp"
+#include "client/game/Game.hpp"
+#include "common/network/NetworkManager.hpp"
+#include "client/pack/AssetPackManager.hpp"
+#include "common/pack/PackManager.hpp"
+#include "common/pack/ScriptManager.hpp"
+#include "server/HeadlessServer.hpp"
+#include "server/ServerBootstrap.hpp"
+#include "client/ui/GameUI.hpp"
 
 namespace {
 constexpr std::uint16_t kDefaultMultiplayerPort = 27015;
@@ -26,7 +28,7 @@ void handleServerSignal(int) {
     gServerRunning = false;
 }
 
-std::filesystem::path findProjectRoot() {
+std::filesystem::path findClientProjectRoot() {
     std::filesystem::path current = std::filesystem::current_path();
 
     while (!current.empty()) {
@@ -81,14 +83,16 @@ int runDedicatedServer(int argc, char** argv) {
     std::signal(SIGINT, handleServerSignal);
     std::signal(SIGTERM, handleServerSignal);
 
-    voxel::NetworkManager network;
-    if (!network.startServer(port)) {
+    const std::filesystem::path projectRoot = voxel::findProjectRoot();
+    voxel::ServerContext context = voxel::loadServerContext(projectRoot);
+    voxel::HeadlessServer server(std::move(context.gameData));
+    if (!server.start(port, projectRoot)) {
         return 1;
     }
 
     std::cout << "VoxelGame dedicated server running on port " << port << ". Press Ctrl+C to stop.\n";
     while (gServerRunning) {
-        network.poll();
+        server.tick();
         std::this_thread::sleep_for(std::chrono::milliseconds(8));
     }
     return 0;
@@ -115,15 +119,34 @@ int main(int argc, char** argv) {
     glfwWindowHint(GLFW_RESIZABLE, GLFW_TRUE);
     glfwWindowHint(GLFW_DECORATED, GLFW_FALSE);
 
+    GLFWmonitor*       monitor = nullptr;
+    for (int i = 1; i < argc; ++i) {
+        if (std::string(argv[i]) == "--fullscreen") {
+            monitor = glfwGetPrimaryMonitor();
+        }
+    }
+
     GLFWmonitor*       primaryMonitor = glfwGetPrimaryMonitor();
     const GLFWvidmode* mode           = glfwGetVideoMode(primaryMonitor);
     glfwWindowHint(GLFW_RED_BITS,     mode->redBits);
     glfwWindowHint(GLFW_GREEN_BITS,   mode->greenBits);
     glfwWindowHint(GLFW_BLUE_BITS,    mode->blueBits);
-    glfwWindowHint(GLFW_REFRESH_RATE, mode->refreshRate);
+    int swapInterval = 1;
+    for (int i = 1; i < argc; ++i) {
+        const std::string arg = argv[i];
+        if (arg == "--limit-fps") {
+            if (i + 1 < argc) {
+                swapInterval = std::stoi(argv[++i]);
+            }
+        }
+    }
+
+    if (swapInterval > 0) {
+        glfwWindowHint(GLFW_REFRESH_RATE, mode->refreshRate);
+    }
 
     GLFWwindow* window = glfwCreateWindow(
-        mode->width, mode->height, "Voxel Game", nullptr, nullptr);
+        mode->width, mode->height, "Voxel Game", monitor, nullptr);
     if (window == nullptr) {
         std::cerr << "Failed to create the window. Make sure GLFW and an OpenGL driver are installed.\n";
         glfwTerminate();
@@ -131,11 +154,16 @@ int main(int argc, char** argv) {
     }
 
     int monitorX = 0, monitorY = 0;
-    glfwGetMonitorPos(primaryMonitor, &monitorX, &monitorY);
-    glfwSetWindowPos(window, monitorX, monitorY);
+    if (monitor == nullptr) {
+        glfwGetMonitorPos(primaryMonitor, &monitorX, &monitorY);
+        glfwSetWindowPos(window, monitorX, monitorY);
+        glfwSetWindowAttrib(window, GLFW_DECORATED, GLFW_TRUE);
+    }
+
 
     glfwMakeContextCurrent(window);
-    glfwSwapInterval(1);
+    glfwSwapInterval(swapInterval);
+    std::cout << "[Main] glfwSwapInterval set to " << swapInterval << std::endl;
     glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
     if (glfwRawMouseMotionSupported()) {
         glfwSetInputMode(window, GLFW_RAW_MOUSE_MOTION, GLFW_TRUE);
@@ -145,9 +173,17 @@ int main(int argc, char** argv) {
     glEnable(GL_CULL_FACE);
     glCullFace(GL_BACK);
 
+    std::string playerName = "Player";
+    for (int i = 1; i < argc; ++i) {
+        const std::string arg = argv[i];
+        if (arg == "--name" && i + 1 < argc) {
+            playerName = argv[++i];
+        }
+    }
+
     try {
         // ── Pack system ───────────────────────────────────────────────────────
-        const std::filesystem::path projectRoot = findProjectRoot();
+        const std::filesystem::path projectRoot = findClientProjectRoot();
         const std::filesystem::path packsDir    = projectRoot / "packs";
 
         voxel::PackManager packManager;
@@ -192,10 +228,16 @@ int main(int argc, char** argv) {
                 if (network.connectToServer(hostName, port)) {
                     activeNetwork = &network;
                 }
+            } else if (arg == "--limit-fps") {
+                if (i + 1 < argc) {
+                    i++; // Already handled above
+                }
+            } else {
+                // Unknown argument or --server (which is handled by runDedicatedServer)
             }
         }
 
-        voxel::Game   game(std::move(gameData), assetsRoot, activeNetwork);
+        voxel::Game   game(std::move(gameData), assetsRoot, playerName, activeNetwork);
         voxel::GameUI ui(window, fbWidth, fbHeight, assetsRoot);
 
         // Forward GLFW events to RmlUI — use window user pointer so lambdas
@@ -230,10 +272,20 @@ int main(int argc, char** argv) {
 
         float lastTime   = static_cast<float>(glfwGetTime());
         bool  escWasDown = false;
+        bool  enterWasDown = false;
+        bool  gWasDown = false;
+
+        ui.setGameData(&game.gameData());
+        {
+            std::vector<voxel::RecipeDefinition> recipes;
+            for (auto const& [id, recipe] : game.gameData().recipes) recipes.push_back(recipe);
+            ui.setRecipes(recipes);
+        }
 
         while (!glfwWindowShouldClose(window)) {
             const float currentTime = static_cast<float>(glfwGetTime());
-            const float deltaTime   = std::min(currentTime - lastTime, 0.05f);
+            const float rawDelta    = currentTime - lastTime;
+            const float deltaTime   = std::min(rawDelta, 0.05f);
             lastTime = currentTime;
 
             // ESC edge-triggers cursor capture toggle
@@ -248,7 +300,66 @@ int main(int argc, char** argv) {
             }
             escWasDown = escDown;
 
+            // ENTER or T opens/closes chat
+            const bool enterDown = glfwGetKey(window, GLFW_KEY_ENTER) == GLFW_PRESS;
+            const bool tDown = glfwGetKey(window, GLFW_KEY_T) == GLFW_PRESS;
+            if ((enterDown && !enterWasDown) || (tDown && !ui.isChatOpen())) {
+                if (ui.isChatOpen()) {
+                    // Chat is already open, Enter might be handled by ImGui InputText(EnterReturnsTrue)
+                } else {
+                    ui.setChatOpen(true);
+                    glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
+                }
+            }
+            enterWasDown = enterDown;
+
+            // G opens/closes crafting
+            const bool gDown = glfwGetKey(window, GLFW_KEY_G) == GLFW_PRESS;
+            if (gDown && !gWasDown) {
+                ui.setCraftingOpen(!ui.isCraftingOpen());
+                if (ui.isCraftingOpen()) {
+                    glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
+                } else if (!ui.isChatOpen()) {
+                    glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+                }
+            }
+            gWasDown = gDown;
+
             game.update(window, deltaTime);
+
+            // Sync world time from network
+            if (auto time = network.takePendingWorldTime()) {
+                game.simulation().setTime(*time);
+            }
+
+            // Sync chat between UI and Network
+            std::string chatInput = ui.consumePendingChatInput();
+            if (!chatInput.empty() && activeNetwork) {
+                activeNetwork->publishChatMessage(chatInput);
+                ui.addChatMessage(playerName, chatInput);
+            }
+
+            for (auto& chat : network.takePendingChatMessages()) {
+                std::string sender = "Server";
+                if (chat.playerId == network.localPlayerId()) {
+                    sender = playerName;
+                } else {
+                    auto it = network.remotePlayers().find(chat.playerId);
+                    if (it != network.remotePlayers().end()) {
+                        sender = it->second.name;
+                    } else {
+                        sender = "Player " + std::to_string(chat.playerId);
+                    }
+                }
+                ui.addChatMessage(sender, chat.message);
+            }
+
+            // Sync crafting between UI and Network
+            std::string craftReq = ui.consumePendingCraftRequest();
+            if (!craftReq.empty() && activeNetwork) {
+                activeNetwork->publishCraftRequest(craftReq);
+            }
+
             ui.setDebugData(game.getDebugData());
             ui.setInventory(game.getInventory());
             ui.update();

@@ -97,7 +97,7 @@ set(IMGUI_SOURCES
     ${imgui_SOURCE_DIR}/imgui_widgets.cpp
     ${imgui_SOURCE_DIR}/backends/imgui_impl_glfw.cpp
     ${imgui_SOURCE_DIR}/backends/imgui_impl_opengl2.cpp
-        src/pack/ScriptBindingCustom.cpp
+    src/common/pack/ScriptBindingCustom.cpp
 )
 
 find_package(glfw3 CONFIG QUIET)
@@ -168,42 +168,50 @@ else()  # Linux / BSD
 endif()
 
 add_executable(VoxelGame
-    src/data/GameData.cpp
-    src/data/JsonValue.cpp
-    src/pack/Pack.cpp
-    src/pack/PackManager.cpp
-    src/pack/AssetPackManager.cpp
-    src/pack/ScriptManager.cpp
-    src/pack/ScriptBindingsCustom.cpp
-    src/pack/generated/ParseBindings.cpp
+    src/common/data/GameData.cpp
+    src/common/data/JsonValue.cpp
+    src/common/pack/Pack.cpp
+    src/common/pack/PackManager.cpp
+    src/client/pack/AssetPackManager.cpp
+    src/common/pack/ScriptManager.cpp
+    src/common/pack/ScriptBindingsCustom.cpp
+    src/common/pack/generated/ParseBindings.cpp
     src/main.cpp
-    src/game/Game.cpp
-    src/game/GameBlocks.cpp
-    src/game/GameLifecycle.cpp
-    src/game/GameRender.cpp
-    src/game/GameUpdate.cpp
-    src/Math.cpp
-    src/network/NetworkManager.cpp
-    src/player/Inventory.cpp
-    src/render/Mesh.cpp
-    src/render/ModelManager.cpp
-    src/Player.cpp
-    src/render/Renderer.cpp
-    src/render/ShaderProgram.cpp
-    src/render/TextureManager.cpp
-    src/ui/GameUI.cpp
-    src/world/BiomeDefinition.cpp
-    src/world/TerrainGenerator.cpp
-    src/world/WorldSimulation.cpp
-    src/world/World.cpp
+    src/client/game/Game.cpp
+    src/client/game/GameBlocks.cpp
+    src/client/game/GameLifecycle.cpp
+    src/client/game/GameRender.cpp
+    src/client/game/GameUpdate.cpp
+    src/common/Math.cpp
+    src/common/OSUtils.cpp
+    src/common/world/WorldPersistence.cpp
+    src/common/network/NetworkManager.cpp
+    src/server/HeadlessServer.cpp
+    src/server/ServerBootstrap.cpp
+    src/common/player/Inventory.cpp
+    src/client/render/Mesh.cpp
+    src/client/render/ModelManager.cpp
+    src/common/Player.cpp
+    src/client/render/Renderer.cpp
+    src/client/render/ShaderProgram.cpp
+    src/client/render/TextureManager.cpp
+    src/client/ui/GameUI.cpp
+    src/common/world/BiomeDefinition.cpp
+    src/common/world/TerrainGenerator.cpp
+    src/common/world/WorldSimulation.cpp
+    src/common/world/World.cpp
     ${rmlui_SOURCE_DIR}/Backends/RmlUi_Platform_GLFW.cpp
     ${rmlui_SOURCE_DIR}/Backends/RmlUi_Renderer_GL2.cpp
     ${IMGUI_SOURCES}
-        src/pack/ScriptBindingCustom.cpp
 )
 target_include_directories(VoxelGame PRIVATE
     include
-        libraries
+    include/common
+    include/client
+    include/server
+    src/client
+    src/server
+    libraries
     ${enet_SOURCE_DIR}/include
     ${quickjs_SOURCE_DIR}
     ${rmlui_SOURCE_DIR}/Include
@@ -212,6 +220,7 @@ target_include_directories(VoxelGame PRIVATE
     ${imgui_SOURCE_DIR}/backends
 )
 target_compile_features(VoxelGame PRIVATE cxx_std_20)
+target_compile_definitions(VoxelGame PRIVATE VOXEL_CLIENT)
 target_link_libraries(VoxelGame PRIVATE
     enet
     miniz
@@ -227,14 +236,38 @@ endif()
 
 add_executable(VoxelServer
     src/server/ServerMain.cpp
-    src/network/NetworkManager.cpp
+    src/server/HeadlessServer.cpp
+    src/server/ServerBootstrap.cpp
+    src/common/data/GameData.cpp
+    src/common/data/JsonValue.cpp
+    src/common/pack/Pack.cpp
+    src/common/pack/PackManager.cpp
+    src/common/pack/ScriptManager.cpp
+    src/common/pack/ScriptBindingCustom.cpp
+    src/common/pack/ScriptBindingsCustom.cpp
+    src/common/pack/generated/ParseBindings.cpp
+    src/common/Math.cpp
+    src/common/OSUtils.cpp
+    src/common/Player.cpp
+    src/common/world/WorldPersistence.cpp
+    src/common/player/Inventory.cpp
+    src/common/network/NetworkManager.cpp
+    src/common/world/BiomeDefinition.cpp
+    src/common/world/TerrainGenerator.cpp
+    src/common/world/World.cpp
+    src/common/world/WorldSimulation.cpp
 )
 target_include_directories(VoxelServer PRIVATE
     include
+    include/common
+    include/server
+    src/server
+    libraries
     ${enet_SOURCE_DIR}/include
+    ${quickjs_SOURCE_DIR}
 )
 target_compile_features(VoxelServer PRIVATE cxx_std_20)
-target_link_libraries(VoxelServer PRIVATE enet)
+target_link_libraries(VoxelServer PRIVATE enet miniz qjs)
 if(WIN32)
     target_link_libraries(VoxelServer PRIVATE ws2_32 winmm)
 endif()

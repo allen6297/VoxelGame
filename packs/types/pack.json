@@ -1,0 +1,7 @@
+{
+  "name": "Types",
+  "version": "0.1.0",
+  "description": "Scripting type definitions",
+  "game_version": "0.1.0",
+  "dependencies": []
+}
