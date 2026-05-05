@@ -1,24 +1,17 @@
-name: CMake CI
+name: Makefile CI
 
 on:
   push:
-    branches: ["main"]
+    branches: [ "main" ]
   pull_request:
-    branches: ["main"]
+    branches: [ "main" ]
 
 jobs:
   build:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v5
-        
-      - name: Configure
-        run: cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+      - uses: actions/checkout@v4
 
       - name: Build
-        run: cmake --build build
-
-      - name: Package
-        run: cmake --build build --target package
+        run: make
