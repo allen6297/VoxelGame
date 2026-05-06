@@ -18,7 +18,7 @@ jobs:
         with:
           node-version: 24
 
-      - run: npm install @notionhq/client
+      - run: npm install @notionhq/client@2.2.15
 
       - name: Sync issue to Notion
         run: node .github/scripts/sync_issues_to_notion.js
