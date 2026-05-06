@@ -1,3 +1,7 @@
+console.log("Running Notion issue sync")
+console.log(`Issue #${issue.number}: ${issue.title}`)
+console.log(`Labels: ${issue.labels.map(label => label.name).join(", ")}`)
+
 const { Client } = require("@notionhq/client")
 
 const notion = new Client({
