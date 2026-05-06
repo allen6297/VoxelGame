@@ -33,12 +33,12 @@ async function main() {
         }))
       },
 
-      "issue number": {
+      "Issue Number": {
         number: issue.number
       },
 
       Status: {
-        status: {
+        select: {
           name: issue.state === "closed" ? "Done" : "Open"
         }
       },
