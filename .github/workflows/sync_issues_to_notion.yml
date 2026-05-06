@@ -21,7 +21,7 @@ jobs:
       - run: npm install @notionhq/client
 
       - name: Sync issue to Notion
-        run: node .github/scripts/sync_issue_to_notion.js
+        run: node .github/scripts/sync_issues_to_notion.js
         env:
           NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
           NOTION_DATABASE_ID: ${{ secrets.NOTION_DATABASE_ID }}
