@@ -6,48 +6,76 @@ const notion = new Client({
 
 const issue = JSON.parse(process.env.ISSUE_JSON)
 
-async function main() {
-  await notion.pages.create({
-    parent: {
-      database_id: process.env.NOTION_DATABASE_ID
-    },
+const properties = {
+  Name: {
+    title: [{ text: { content: issue.title } }]
+  },
 
-    properties: {
-      Name: {
-        title: [{ text: { content: issue.title } }]
-      },
-
-      Description: {
-        rich_text: [
-          {
-            text: {
-              content: issue.body || "No description."
-            }
-          }
-        ]
-      },
-
-      Tags: {
-        multi_select: issue.labels.map(label => ({
-          name: label.name
-        }))
-      },
-
-      "Issue Number": {
-        number: issue.number
-      },
-
-      Status: {
-        select: {
-          name: issue.state === "closed" ? "Done" : "Open"
+  Description: {
+    rich_text: [
+      {
+        text: {
+          content: issue.body || "No description."
         }
-      },
+      }
+    ]
+  },
 
-      "Github Issue": {
-        url: issue.html_url
+  Tags: {
+    multi_select: issue.labels.map(label => ({
+      name: label.name
+    }))
+  },
+
+  "Issue Number": {
+    number: issue.number
+  },
+
+  Status: {
+    select: {
+      name: issue.state === "closed" ? "Done" : "Open"
+    }
+  },
+
+  "Github Issue": {
+    url: issue.html_url
+  }
+}
+
+async function findExistingPage() {
+  const response = await notion.databases.query({
+    database_id: process.env.NOTION_DATABASE_ID,
+    filter: {
+      property: "Issue Number",
+      number: {
+        equals: issue.number
       }
     }
   })
+
+  return response.results[0]
+}
+
+async function main() {
+  const existingPage = await findExistingPage()
+
+  if (existingPage) {
+    await notion.pages.update({
+      page_id: existingPage.id,
+      properties
+    })
+
+    console.log(`Updated Notion issue #${issue.number}`)
+  } else {
+    await notion.pages.create({
+      parent: {
+        database_id: process.env.NOTION_DATABASE_ID
+      },
+      properties
+    })
+
+    console.log(`Created Notion issue #${issue.number}`)
+  }
 }
 
 main().catch(err => {
