@@ -1,13 +1,15 @@
-# .github/workflows/sync-issues-to-notion.yml
 name: Sync Issues to Notion
 
 on:
   issues:
-    types: [opened, edited, closed, reopened, assigned, labeled, unlabeled]
+    types: [opened, edited, closed]
 
 jobs:
   sync:
     runs-on: ubuntu-latest
+
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
     steps:
       - uses: actions/checkout@v4
@@ -24,4 +26,3 @@ jobs:
           NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
           NOTION_DATABASE_ID: ${{ secrets.NOTION_DATABASE_ID }}
           ISSUE_JSON: ${{ toJson(github.event.issue) }}
-          ACTION: ${{ github.event.action }}
