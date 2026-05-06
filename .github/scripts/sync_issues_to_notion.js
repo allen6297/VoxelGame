@@ -47,8 +47,8 @@ const properties = {
 }
 
 async function findExistingPage() {
-  const response = await notion.dataSources.query({
-    data_source_id: process.env.NOTION_DATABASE_ID,
+  const response = await notion.databases.query({
+    database_id: process.env.NOTION_DATABASE_ID,
     filter: {
       property: "Issue Number",
       number: {
