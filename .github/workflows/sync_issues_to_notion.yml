@@ -1,0 +1,27 @@
+# .github/workflows/sync-issues-to-notion.yml
+name: Sync Issues to Notion
+
+on:
+  issues:
+    types: [opened, edited, closed, reopened, assigned, labeled, unlabeled]
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - run: npm install @notionhq/client
+
+      - name: Sync issue to Notion
+        run: node .github/scripts/sync-issue-to-notion.js
+        env:
+          NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
+          NOTION_DATABASE_ID: ${{ secrets.NOTION_DATABASE_ID }}
+          ISSUE_JSON: ${{ toJson(github.event.issue) }}
+          ACTION: ${{ github.event.action }}
