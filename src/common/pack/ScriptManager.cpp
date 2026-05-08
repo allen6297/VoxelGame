@@ -11,12 +11,15 @@
 #include <quickjs.h>
 
 #include <algorithm>
+#include <cctype>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <optional>
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <utility>
 
 namespace {
 static std::string readFile(const std::filesystem::path& path) {
@@ -25,6 +28,88 @@ static std::string readFile(const std::filesystem::path& path) {
     std::ostringstream ss;
     ss << f.rdbuf();
     return ss.str();
+}
+
+std::string jsValueToString(JSContext* ctx, JSValueConst value) {
+    const char* text = JS_ToCString(ctx, value);
+    std::string result = text ? text : "";
+    JS_FreeCString(ctx, text);
+    return result;
+}
+
+std::string getJsStringProperty(JSContext* ctx, JSValueConst value, const char* key) {
+    JSValue prop = JS_GetPropertyStr(ctx, value, key);
+    if (JS_IsUndefined(prop) || JS_IsNull(prop)) {
+        JS_FreeValue(ctx, prop);
+        return {};
+    }
+    std::string result = jsValueToString(ctx, prop);
+    JS_FreeValue(ctx, prop);
+    return result;
+}
+
+std::optional<std::pair<int, int>> extractLocation(const std::string& stack, const std::string& needle) {
+    const std::size_t pos = stack.find(needle);
+    if (pos == std::string::npos) {
+        return std::nullopt;
+    }
+
+    std::size_t cursor = pos + needle.size();
+    if (cursor >= stack.size() || stack[cursor] != ':') {
+        return std::nullopt;
+    }
+    ++cursor;
+
+    const std::size_t lineStart = cursor;
+    while (cursor < stack.size() && std::isdigit(static_cast<unsigned char>(stack[cursor]))) {
+        ++cursor;
+    }
+    if (cursor == lineStart || cursor >= stack.size() || stack[cursor] != ':') {
+        return std::nullopt;
+    }
+    const int line = std::stoi(stack.substr(lineStart, cursor - lineStart));
+    ++cursor;
+
+    const std::size_t columnStart = cursor;
+    while (cursor < stack.size() && std::isdigit(static_cast<unsigned char>(stack[cursor]))) {
+        ++cursor;
+    }
+    if (cursor == columnStart) {
+        return std::make_pair(line, 0);
+    }
+
+    return std::make_pair(line, std::stoi(stack.substr(columnStart, cursor - columnStart)));
+}
+
+std::string sourceSnippet(const std::string& source, const int lineNumber, const int columnNumber) {
+    if (lineNumber <= 0 || source.empty()) {
+        return {};
+    }
+
+    int currentLine = 1;
+    std::size_t lineStart = 0;
+    for (std::size_t i = 0; i <= source.size(); ++i) {
+        if (i == source.size() || source[i] == '\n') {
+            if (currentLine == lineNumber) {
+                const std::size_t lineEnd = i;
+                std::string snippet = source.substr(lineStart, lineEnd - lineStart);
+                if (columnNumber > 0) {
+                    snippet += "\n";
+                    snippet.append(static_cast<std::size_t>(columnNumber - 1), ' ');
+                    snippet += "^";
+                }
+                return snippet;
+            }
+            ++currentLine;
+            lineStart = i + 1;
+        }
+    }
+
+    return {};
+}
+
+const char* phaseName(const voxel::ScriptPhase phase) {
+    return phase == voxel::ScriptPhase::Startup ? "startup" : "runtime";
 }
 }  // namespace
 
@@ -56,6 +141,9 @@ ScriptManager::~ScriptManager() {
 
 GameData ScriptManager::loadGameData(const PackManager& packManager,
                                      const std::filesystem::path& engineScriptsPath) {
+    engineScriptsPath_ = engineScriptsPath;
+    currentPhase_ = ScriptPhase::Startup;
+
     // Execute engine scripts first (defines StartupEvents, Registry, etc.) in sorted order.
     if (std::filesystem::is_directory(engineScriptsPath)) {
         std::vector<std::filesystem::path> engineFiles;
@@ -65,7 +153,10 @@ GameData ScriptManager::loadGameData(const PackManager& packManager,
         }
         std::sort(engineFiles.begin(), engineFiles.end());
         for (const auto& path : engineFiles) {
-            executeScript(readFile(path), "<engine>/" + path.filename().string());
+            if (path.filename() == "05_runtime.js") {
+                continue;
+            }
+            executeScript(readFile(path), "<engine>/" + path.filename().string(), ScriptPhase::Startup);
         }
     } else {
         std::cerr << "[ScriptManager] Warning: engine scripts path not found: "
@@ -91,7 +182,7 @@ GameData ScriptManager::loadGameData(const PackManager& packManager,
             if (pack.hasFile("scripts/startup/main.js")) {
                 auto src = pack.readFile("scripts/startup/main.js");
                 if (src) {
-                    executeScript(*src, pack.id() + ":scripts/startup/main.js");
+                    executeScript(*src, pack.id() + ":scripts/startup/main.js", ScriptPhase::Startup);
                 }
             } else {
                 // Execute every .js file in scripts/startup/ in alphabetical order.
@@ -101,7 +192,7 @@ GameData ScriptManager::loadGameData(const PackManager& packManager,
                     if (f.size() > 3 && f.compare(f.size() - 3, 3, ".js") == 0) {
                         auto src = pack.readFile(f);
                         if (src) {
-                            executeScript(*src, pack.id() + ":" + f);
+                            executeScript(*src, pack.id() + ":" + f, ScriptPhase::Startup);
                         }
                     }
                 }
@@ -156,27 +247,70 @@ void ScriptManager::setupGlobals() {
 
 // ── executeScript ─────────────────────────────────────────────────────────────
 
-void ScriptManager::executeScript(const std::string& source, const std::string& filename) {
+void ScriptManager::executeScript(const std::string& source, const std::string& filename, const ScriptPhase phase) {
+    currentPhase_ = phase;
     JSValue result = JS_Eval(context_, source.c_str(), source.size(),
                              filename.c_str(), JS_EVAL_TYPE_GLOBAL);
     if (JS_IsException(result)) {
-        checkException(context_, -1, filename);
+        checkException(context_, -1, filename, phase, source);
     }
     JS_FreeValue(context_, result);
 }
 
 // ── checkException ────────────────────────────────────────────────────────────
 
-bool ScriptManager::checkException(JSContext* ctx, int result, const std::string& context) {
+bool ScriptManager::checkException(JSContext* ctx, int result, const std::string& context, const ScriptPhase phase, const std::string& source) {
     if (result >= 0) return false;
 
     JSValue exc = JS_GetException(ctx);
-    const char* msg = JS_ToCString(ctx, exc);
-    std::cerr << "[ScriptManager] Exception in " << context << ": "
-              << (msg ? msg : "(unknown error)") << '\n';
-    JS_FreeCString(ctx, msg);
+    const std::string message = getJsStringProperty(ctx, exc, "message");
+    const std::string stack = getJsStringProperty(ctx, exc, "stack");
+    const std::string errorName = getJsStringProperty(ctx, exc, "name");
+
+    std::optional<std::pair<int, int>> location;
+    if (!context.empty() && !stack.empty()) {
+        location = extractLocation(stack, context);
+    }
+    if (!location && !stack.empty()) {
+        location = extractLocation(stack, "<eval>");
+    }
+
+    std::cerr << "[ScriptManager] " << phaseName(phase) << " script error in " << context << '\n';
+    if (!errorName.empty() || !message.empty()) {
+        std::cerr << "  " << (errorName.empty() ? "Error" : errorName) << ": "
+                  << (message.empty() ? "(unknown error)" : message) << '\n';
+    }
+    if (location.has_value()) {
+        std::cerr << "  Location: line " << location->first;
+        if (location->second > 0) {
+            std::cerr << ", column " << location->second;
+        }
+        std::cerr << '\n';
+    }
+    if (!stack.empty()) {
+        std::cerr << "  Stack:\n" << stack << '\n';
+    }
+    if (!source.empty() && location.has_value()) {
+        const std::string snippet = sourceSnippet(source, location->first, location->second);
+        if (!snippet.empty()) {
+            std::cerr << "  Source:\n" << snippet << '\n';
+        }
+    }
     JS_FreeValue(ctx, exc);
     return true;
+}
+
+const char* ScriptManager::scriptPhaseName(const ScriptPhase phase) {
+    return phaseName(phase);
+}
+
+bool ScriptManager::requirePhase(JSContext* ctx, const ScriptPhase expected, const char* apiName) const {
+    if (currentPhase_ == expected) {
+        return true;
+    }
+
+    JS_ThrowTypeError(ctx, "%s is only available during %s scripts", apiName, scriptPhaseName(expected));
+    return false;
 }
 
 // ── parseBlockState ───────────────────────────────────────────────────────────
@@ -314,10 +448,13 @@ JSValue ScriptManager::biomeToJs(const BiomeDefinition& biome) const {
 // ── Static JS callbacks ───────────────────────────────────────────────────────
 
 JSValue ScriptManager::jsRegisterBlock(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv) {
+    auto* self = static_cast<ScriptManager*>(JS_GetContextOpaque(ctx));
+    if (!self || !self->requirePhase(ctx, ScriptPhase::Startup, "StartupEvents.registry(\"block\")")) {
+        return JS_EXCEPTION;
+    }
     if (argc < 1 || !JS_IsObject(argv[0]))
         return JS_ThrowTypeError(ctx, "Registry.registerBlock: expected an object argument");
 
-    auto* self = static_cast<ScriptManager*>(JS_GetContextOpaque(ctx));
     BlockDefinition block;
     try {
         block = voxel::generated::parseBlockDefinition(ctx, argv[0]);
@@ -344,10 +481,13 @@ JSValue ScriptManager::jsRegisterBlock(JSContext* ctx, JSValueConst, int argc, J
 }
 
 JSValue ScriptManager::jsRegisterItem(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv) {
+    auto* self = static_cast<ScriptManager*>(JS_GetContextOpaque(ctx));
+    if (!self || !self->requirePhase(ctx, ScriptPhase::Startup, "StartupEvents.registry(\"item\")")) {
+        return JS_EXCEPTION;
+    }
     if (argc < 1 || !JS_IsObject(argv[0]))
         return JS_ThrowTypeError(ctx, "Registry.registerItem: expected an object argument");
 
-    auto* self = static_cast<ScriptManager*>(JS_GetContextOpaque(ctx));
     ItemDefinition item;
     try {
         item = voxel::generated::parseItemDefinition(ctx, argv[0]);
@@ -362,10 +502,13 @@ JSValue ScriptManager::jsRegisterItem(JSContext* ctx, JSValueConst, int argc, JS
 }
 
 JSValue ScriptManager::jsRegisterBiome(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv) {
+    auto* self = static_cast<ScriptManager*>(JS_GetContextOpaque(ctx));
+    if (!self || !self->requirePhase(ctx, ScriptPhase::Startup, "StartupEvents.registry(\"biome\")")) {
+        return JS_EXCEPTION;
+    }
     if (argc < 1 || !JS_IsObject(argv[0]))
         return JS_ThrowTypeError(ctx, "Registry.registerBiome: expected an object argument");
 
-    auto* self = static_cast<ScriptManager*>(JS_GetContextOpaque(ctx));
     BiomeDefinition biome;
     try {
         biome = voxel::generated::parseBiomeDefinition(ctx, argv[0]);
@@ -380,10 +523,13 @@ JSValue ScriptManager::jsRegisterBiome(JSContext* ctx, JSValueConst, int argc, J
 }
 
 JSValue ScriptManager::jsRegisterTag(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv) {
+    auto* self = static_cast<ScriptManager*>(JS_GetContextOpaque(ctx));
+    if (!self || !self->requirePhase(ctx, ScriptPhase::Startup, "StartupEvents.registry(\"tag\")")) {
+        return JS_EXCEPTION;
+    }
     if (argc < 1)
         return JS_ThrowTypeError(ctx, "__registerTag: expected an id string or object");
 
-    auto* self = static_cast<ScriptManager*>(JS_GetContextOpaque(ctx));
     TagDefinition tag;
 
     if (JS_IsString(argv[0])) {
@@ -483,6 +629,10 @@ JSValue ScriptManager::jsGetBiome(JSContext* ctx, JSValueConst, int argc, JSValu
 
 JSValue ScriptManager::jsModifyBlock(JSContext* ctx, JSValueConst,
                                      int argc, JSValueConst* argv) {
+    auto* self = static_cast<ScriptManager*>(JS_GetContextOpaque(ctx));
+    if (!self || !self->requirePhase(ctx, ScriptPhase::Startup, "Registry.modifyBlock")) {
+        return JS_EXCEPTION;
+    }
     if (argc < 2)
         return JS_ThrowTypeError(ctx, "__modifyBlock: expected (id, patchObj)");
 
@@ -491,8 +641,6 @@ JSValue ScriptManager::jsModifyBlock(JSContext* ctx, JSValueConst,
         return JS_ThrowTypeError(ctx, "__modifyBlock: invalid id argument");
     std::string blockId(id);
     JS_FreeCString(ctx, id);
-
-    auto* self = static_cast<ScriptManager*>(JS_GetContextOpaque(ctx));
 
     // Find the pending block registration by id.
     for (auto& b : self->pendingBlocks_) {
@@ -800,7 +948,10 @@ void ScriptManager::loadPackJsonRecipes(const Pack& pack) {
 
 JSValue ScriptManager::jsWorldGetBlock(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv) {
     auto* self = static_cast<ScriptManager*>(JS_GetContextOpaque(ctx));
-    if (!self || !self->worldSimulation_) return JS_UNDEFINED;
+    if (!self || !self->requirePhase(ctx, ScriptPhase::Runtime, "World.getBlock")) {
+        return JS_EXCEPTION;
+    }
+    if (!self->worldSimulation_) return JS_UNDEFINED;
 
     int32_t x, y, z;
     if (JS_ToInt32(ctx, &x, argv[0]) < 0) return JS_EXCEPTION;
@@ -819,7 +970,10 @@ JSValue ScriptManager::jsWorldGetBlock(JSContext* ctx, JSValueConst, int argc, J
 
 JSValue ScriptManager::jsWorldSetBlock(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv) {
     auto* self = static_cast<ScriptManager*>(JS_GetContextOpaque(ctx));
-    if (!self || !self->worldSimulation_) return JS_UNDEFINED;
+    if (!self || !self->requirePhase(ctx, ScriptPhase::Runtime, "World.setBlock")) {
+        return JS_EXCEPTION;
+    }
+    if (!self->worldSimulation_) return JS_UNDEFINED;
 
     int32_t x, y, z;
     if (JS_ToInt32(ctx, &x, argv[0]) < 0) return JS_EXCEPTION;
@@ -845,7 +999,10 @@ JSValue ScriptManager::jsWorldSetBlock(JSContext* ctx, JSValueConst, int argc, J
 
 JSValue ScriptManager::jsPlayerGetPosition(JSContext* ctx, JSValueConst, int, JSValueConst*) {
     auto* self = static_cast<ScriptManager*>(JS_GetContextOpaque(ctx));
-    if (!self || !self->currentPlayer_) return JS_UNDEFINED;
+    if (!self || !self->requirePhase(ctx, ScriptPhase::Runtime, "Player.getPosition")) {
+        return JS_EXCEPTION;
+    }
+    if (!self->currentPlayer_) return JS_UNDEFINED;
 
     JSValue obj = JS_NewObject(ctx);
     JS_SetPropertyStr(ctx, obj, "x", JS_NewFloat64(ctx, self->currentPlayer_->position.x));
@@ -856,7 +1013,10 @@ JSValue ScriptManager::jsPlayerGetPosition(JSContext* ctx, JSValueConst, int, JS
 
 JSValue ScriptManager::jsPlayerSetPosition(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv) {
     auto* self = static_cast<ScriptManager*>(JS_GetContextOpaque(ctx));
-    if (!self || !self->currentPlayer_) return JS_UNDEFINED;
+    if (!self || !self->requirePhase(ctx, ScriptPhase::Runtime, "Player.setPosition")) {
+        return JS_EXCEPTION;
+    }
+    if (!self->currentPlayer_) return JS_UNDEFINED;
 
     double x, y, z;
     if (JS_ToFloat64(ctx, &x, argv[0]) < 0) return JS_EXCEPTION;
@@ -869,7 +1029,10 @@ JSValue ScriptManager::jsPlayerSetPosition(JSContext* ctx, JSValueConst, int arg
 
 JSValue ScriptManager::jsPlayerGetInventory(JSContext* ctx, JSValueConst, int, JSValueConst*) {
     auto* self = static_cast<ScriptManager*>(JS_GetContextOpaque(ctx));
-    if (!self || !self->currentPlayer_) return JS_UNDEFINED;
+    if (!self || !self->requirePhase(ctx, ScriptPhase::Runtime, "Player.getInventory")) {
+        return JS_EXCEPTION;
+    }
+    if (!self->currentPlayer_) return JS_UNDEFINED;
 
     JSValue arr = JS_NewArray(ctx);
     for (int i = 0; i < kInventorySlots; ++i) {
@@ -883,6 +1046,18 @@ JSValue ScriptManager::jsPlayerGetInventory(JSContext* ctx, JSValueConst, int, J
 }
 
 void ScriptManager::loadRuntimeScripts(const PackManager& packManager) {
+    currentPhase_ = ScriptPhase::Runtime;
+
+    if (std::filesystem::is_directory(engineScriptsPath_)) {
+        // Runtime wrappers are intentionally loaded in the runtime phase so they
+        // can exist without exposing startup-only APIs in that same pass.
+        // The file defines the public World/Player helper objects.
+        const std::filesystem::path runtimeWrapper = engineScriptsPath_ / "05_runtime.js";
+        if (std::filesystem::exists(runtimeWrapper)) {
+            executeScript(readFile(runtimeWrapper), "<engine>/05_runtime.js", ScriptPhase::Runtime);
+        }
+    }
+
     for (auto it = packManager.packs().rbegin(); it != packManager.packs().rend(); ++it) {
         const Pack& pack = *it;
         if (!pack.manifest().scripts.server) continue;
@@ -890,20 +1065,21 @@ void ScriptManager::loadRuntimeScripts(const PackManager& packManager) {
         if (pack.hasFile("scripts/main.js")) {
             auto src = pack.readFile("scripts/main.js");
             if (src) {
-                executeScript(*src, pack.id() + ":scripts/main.js");
+                executeScript(*src, pack.id() + ":scripts/main.js", ScriptPhase::Runtime);
             }
         }
     }
 }
 
 void ScriptManager::tick(float deltaTime) {
+    currentPhase_ = ScriptPhase::Runtime;
     JSValue global = JS_GetGlobalObject(context_);
     JSValue tickFn = JS_GetPropertyStr(context_, global, "tick");
     if (JS_IsFunction(context_, tickFn)) {
         JSValue arg = JS_NewFloat64(context_, deltaTime);
         JSValue result = JS_Call(context_, tickFn, global, 1, &arg);
         if (JS_IsException(result)) {
-            checkException(context_, -1, "tick");
+            checkException(context_, -1, "tick", ScriptPhase::Runtime);
         }
         JS_FreeValue(context_, result);
     }

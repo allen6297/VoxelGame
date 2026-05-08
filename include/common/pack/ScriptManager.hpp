@@ -10,6 +10,11 @@
 
 namespace voxel {
 
+enum class ScriptPhase {
+    Startup = 0,
+    Runtime = 1,
+};
+
 // Embeds a QuickJS runtime, exposes Registry and StartupEvents globals to JavaScript,
 // executes all pack scripts in load order, and produces a populated GameData.
 //
@@ -49,6 +54,7 @@ public:
 private:
     JSRuntime* runtime_ = nullptr;
     JSContext* context_ = nullptr;
+    ScriptPhase currentPhase_ = ScriptPhase::Startup;
 
     // Accumulated during script execution
     std::vector<BlockDefinition>      pendingBlocks_;
@@ -59,8 +65,10 @@ private:
     std::vector<BlockStateDefinition> pendingBlockStates_;
 
     void setupGlobals();
-    void executeScript(const std::string& source, const std::string& filename);
-    bool checkException(JSContext* ctx, int result, const std::string& context);
+    void executeScript(const std::string& source, const std::string& filename, ScriptPhase phase);
+    bool checkException(JSContext* ctx, int result, const std::string& context, ScriptPhase phase, const std::string& source = {});
+    static const char* scriptPhaseName(ScriptPhase phase);
+    bool requirePhase(JSContext* ctx, ScriptPhase expected, const char* apiName) const;
 
     // __register* — private write-side callbacks used by StartupEvents.
     static JSValue jsRegisterBlock(JSContext*, JSValueConst, int, JSValueConst*);
@@ -104,6 +112,7 @@ private:
     WorldSimulation* worldSimulation_ = nullptr;
     Player* currentPlayer_ = nullptr;
     const GameData* gameData_ = nullptr;
+    std::filesystem::path engineScriptsPath_;
 };
 
 }  // namespace voxel
