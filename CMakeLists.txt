@@ -236,6 +236,7 @@ add_library(voxel_client_support STATIC
     src/client/game/GameRender.cpp
     src/client/game/GameUpdate.cpp
     src/client/render/Mesh.cpp
+    src/platform/glfw/GlfwInput.cpp
     src/client/render/ModelManager.cpp
     src/client/render/Renderer.cpp
     src/client/render/ShaderProgram.cpp
@@ -273,7 +274,7 @@ if(WIN32)
 endif()
 
 add_executable(VoxelGame
-    src/main.cpp
+    src/app/client/ClientMain.cpp
 )
 target_link_libraries(VoxelGame PRIVATE
     voxel_client_support
@@ -281,7 +282,7 @@ target_link_libraries(VoxelGame PRIVATE
 )
 
 add_executable(VoxelServer
-    src/server/ServerMain.cpp
+    src/app/server/ServerMain.cpp
 )
 target_link_libraries(VoxelServer PRIVATE
     voxel_server_support

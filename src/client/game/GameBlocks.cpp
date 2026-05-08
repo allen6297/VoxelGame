@@ -115,10 +115,9 @@ void Game::handleBlockActions() {
     }
 }
 
-void Game::handleInventorySelection(GLFWwindow* window) {
+void Game::handleInventorySelection(const ClientInputFrame& input) {
     for (int i = 0; i < kInventorySlots; ++i) {
-        const int key = GLFW_KEY_1 + i;
-        const bool down = glfwGetKey(window, key) == GLFW_PRESS;
+        const bool down = input.cursorCaptured && input.slotDown[static_cast<std::size_t>(i)];
         if (down && !input_.slotHeld[static_cast<std::size_t>(i)]) {
             selectSlot(player_.inventory, i);
             if (network_ != nullptr && network_->mode() == NetworkManager::Mode::Client) {

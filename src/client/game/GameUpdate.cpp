@@ -29,7 +29,7 @@ bool receivesAuthoritativeChunks(const NetworkManager* network) {
 
 }  // namespace
 
-void Game::update(GLFWwindow* window, const float deltaTime) {
+void Game::update(const ClientInputFrame& input, const float deltaTime) {
     if (network_ != nullptr) {
         network_->poll();
         applyNetworkBlockChanges();
@@ -60,11 +60,11 @@ void Game::update(GLFWwindow* window, const float deltaTime) {
 
     collectPending(playerChunk);
 
-    updateMouseLook(window, player_);
-    updateInput(window, input_);
-    handleInventorySelection(window);
+    updateMouseLook(input, player_);
+    updateInput(input, input_);
+    handleInventorySelection(input);
     jump(player_, input_);
-    updateMovement(window, simulation_.world(), gameData_, player_, deltaTime);
+    updateMovement(input, simulation_.world(), gameData_, player_, deltaTime);
     entitySystem_.update(deltaTime);
     if (!receivesAuthoritativeChunks(network_)) {
         simulateLiquids(deltaTime);
@@ -78,7 +78,7 @@ void Game::update(GLFWwindow* window, const float deltaTime) {
         network_->publishLocalPlayer(player_.name, player_.position, player_.yaw, player_.pitch);
     }
 
-    const bool f5Now = glfwGetKey(window, GLFW_KEY_F5) == GLFW_PRESS;
+    const bool f5Now = input.reloadContentDown;
     if (f5Now && !f5WasPressed_) {
         reloadGameData();
     }

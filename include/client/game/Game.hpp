@@ -6,10 +6,9 @@
 #include <unordered_map>
 #include <vector>
 
-#include <GLFW/glfw3.h>
-
 #include "data/GameData.hpp"
 #include "ecs/EntitySystem.hpp"
+#include "Input.hpp"
 #include "network/NetworkManager.hpp"
 #include "Player.hpp"
 #include "render/Mesh.hpp"
@@ -25,7 +24,7 @@ class Game {
 public:
     Game(GameData gameData, std::string assetsRoot, std::string playerName, NetworkManager* network = nullptr);
     ~Game();
-    void update(GLFWwindow* window, float deltaTime);
+    void update(const ClientInputFrame& input, float deltaTime);
     void reloadContent();
     void render(int framebufferWidth, int framebufferHeight) const;
     void renderHotbarIcons(int framebufferWidth, int framebufferHeight);
@@ -62,7 +61,7 @@ private:
     void scheduleBlockTick(const Int3& block, std::uint16_t stateId, float delaySeconds);
     void scheduleChunkBlockTicks(const Chunk& chunk);
     void handleBlockActions();
-    void handleInventorySelection(GLFWwindow* window);
+    void handleInventorySelection(const ClientInputFrame& input);
     void rebuildChunkMesh(const ChunkCoord& coord);
     void rebuildMeshesAroundBlock(const Int3& block);
     void updateLoadedChunks(const ChunkCoord& playerChunk);

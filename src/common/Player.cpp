@@ -2,9 +2,6 @@
 
 #include <algorithm>
 #include <cmath>
-#ifdef VOXEL_CLIENT
-#include <GLFW/glfw3.h>
-#endif
 
 namespace voxel {
 
@@ -53,42 +50,17 @@ void movePlayerAxis(const World& world, const GameData& gameData, Player& player
 }
 }  // namespace
 
-void updateMouseLook(GLFWwindow* window, Player& player) {
-#ifdef VOXEL_CLIENT
-    static bool   firstMouse = true;
-    static double lastX      = 0.0;
-    static double lastY      = 0.0;
-
-    // Skip mouse look when cursor is visible (ESC unlocked)
-    if (glfwGetInputMode(window, GLFW_CURSOR) != GLFW_CURSOR_DISABLED) {
-        firstMouse = true;  // reset so re-capture has no jump
+void updateMouseLook(const ClientInputFrame& input, Player& player) {
+    if (!input.cursorCaptured) {
         return;
     }
 
-    double cursorX = 0.0;
-    double cursorY = 0.0;
-    glfwGetCursorPos(window, &cursorX, &cursorY);
-
-    if (firstMouse) {
-        lastX = cursorX;
-        lastY = cursorY;
-        firstMouse = false;
-    }
-
-    const double deltaX = cursorX - lastX;
-    const double deltaY = cursorY - lastY;
-    lastX = cursorX;
-    lastY = cursorY;
-
-    player.yaw += static_cast<float>(deltaX) * kMouseSensitivity;
-    player.pitch = std::clamp(player.pitch - static_cast<float>(deltaY) * kMouseSensitivity, -89.0f, 89.0f);
-#endif
+    player.yaw += input.mouseDeltaX * kMouseSensitivity;
+    player.pitch = std::clamp(player.pitch - input.mouseDeltaY * kMouseSensitivity, -89.0f, 89.0f);
 }
 
-void updateInput(GLFWwindow* window, InputState& input) {
-#ifdef VOXEL_CLIENT
-    // If the cursor is not captured, suppress all action inputs
-    if (glfwGetInputMode(window, GLFW_CURSOR) != GLFW_CURSOR_DISABLED) {
+void updateInput(const ClientInputFrame& frame, InputState& input) {
+    if (!frame.cursorCaptured) {
         input.breakPressed = false;
         input.placePressed = false;
         input.jumpPressed  = false;
@@ -98,18 +70,13 @@ void updateInput(GLFWwindow* window, InputState& input) {
         return;
     }
 
-    const bool placeDown = glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_RIGHT) == GLFW_PRESS;
-    const bool breakDown = glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS;
-    const bool jumpDown  = glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS;
+    input.placePressed = frame.placeDown && !input.placeHeld;
+    input.breakPressed = frame.breakDown && !input.breakHeld;
+    input.jumpPressed  = frame.jumpDown && !input.jumpHeld;
 
-    input.placePressed = placeDown && !input.placeHeld;
-    input.breakPressed = breakDown && !input.breakHeld;
-    input.jumpPressed  = jumpDown && !input.jumpHeld;
-
-    input.placeHeld = placeDown;
-    input.breakHeld = breakDown;
-    input.jumpHeld  = jumpDown;
-#endif
+    input.placeHeld = frame.placeDown;
+    input.breakHeld = frame.breakDown;
+    input.jumpHeld  = frame.jumpDown;
 }
 
 void jump(Player& player, const InputState& input) {
@@ -119,26 +86,24 @@ void jump(Player& player, const InputState& input) {
     }
 }
 
-void updateMovement(GLFWwindow* window, const World& world, const GameData& gameData, Player& player, const float deltaTime) {
-#ifdef VOXEL_CLIENT
+void updateMovement(const ClientInputFrame& input, const World& world, const GameData& gameData, Player& player, const float deltaTime) {
     Vec3 moveIntent{0.0f, 0.0f, 0.0f};
 
-    // Only process WASD movement if cursor is captured
-    if (glfwGetInputMode(window, GLFW_CURSOR) == GLFW_CURSOR_DISABLED) {
+    if (input.cursorCaptured) {
         const float yawRad  = toRadians(player.yaw);
         const Vec3  forward{std::sin(yawRad), 0.0f, -std::cos(yawRad)};
         const Vec3  right{std::cos(yawRad), 0.0f, std::sin(yawRad)};
 
-        if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS) {
+        if (input.moveForward) {
             moveIntent = moveIntent + forward;
         }
-        if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS) {
+        if (input.moveBack) {
             moveIntent = moveIntent - forward;
         }
-        if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS) {
+        if (input.moveLeft) {
             moveIntent = moveIntent - right;
         }
-        if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS) {
+        if (input.moveRight) {
             moveIntent = moveIntent + right;
         }
     }
@@ -146,7 +111,6 @@ void updateMovement(GLFWwindow* window, const World& world, const GameData& game
     moveIntent        = normalize(moveIntent);
     player.velocity.x = moveIntent.x * kMoveSpeed;
     player.velocity.z = moveIntent.z * kMoveSpeed;
-#endif
 
     player.velocity.y -= kGravity * deltaTime;
 

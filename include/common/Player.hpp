@@ -2,12 +2,11 @@
 
 #include <array>
 
+#include "Input.hpp"
 #include "Math.hpp"
 #include "player/Inventory.hpp"
 #include "data/GameData.hpp"
 #include "world/World.hpp"
-
-struct GLFWwindow;
 
 namespace voxel {
 constexpr float kPlayerRadius = 0.32f;
@@ -37,8 +36,8 @@ struct InputState {
 bool playerCollidesAt(const World& world, const GameData& gameData, const Vec3& position);
 Vec3 getLookDirection(const Player& player);
 Vec3 getEyePosition(const Player& player);
-void updateMouseLook(GLFWwindow* window, Player& player);
-void updateInput(GLFWwindow* window, InputState& input);
+void updateMouseLook(const ClientInputFrame& input, Player& player);
+void updateInput(const ClientInputFrame& frame, InputState& input);
 void jump(Player& player, const InputState& input);
-void updateMovement(GLFWwindow* window, const World& world, const GameData& gameData, Player& player, float deltaTime);
+void updateMovement(const ClientInputFrame& input, const World& world, const GameData& gameData, Player& player, float deltaTime);
 }  // namespace voxel

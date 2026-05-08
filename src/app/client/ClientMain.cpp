@@ -18,6 +18,7 @@
 #include "common/pack/ScriptManager.hpp"
 #include "server/HeadlessServer.hpp"
 #include "server/ServerBootstrap.hpp"
+#include "platform/glfw/GlfwInput.hpp"
 #include "client/ui/GameUI.hpp"
 
 namespace {
@@ -286,6 +287,7 @@ int main(int argc, char** argv) {
         bool  enterWasDown = false;
         bool  tWasDown = false;
         bool  gWasDown = false;
+        voxel::GlfwInputCollector inputCollector;
 
         ui.setGameData(&game.gameData());
         {
@@ -343,7 +345,8 @@ int main(int argc, char** argv) {
             }
             gWasDown = gDown;
 
-            game.update(window, deltaTime);
+            const voxel::ClientInputFrame inputFrame = inputCollector.poll(window);
+            game.update(inputFrame, deltaTime);
 
             if (runLocalRuntimeScripts) {
                 scriptManager.tick(deltaTime);

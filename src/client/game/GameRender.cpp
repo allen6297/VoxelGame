@@ -1,5 +1,6 @@
 #include "game/Game.hpp"
 #include "common/Entity.hpp"
+#include "render/OpenGLCompat.hpp"
 
 namespace voxel {
 namespace {
