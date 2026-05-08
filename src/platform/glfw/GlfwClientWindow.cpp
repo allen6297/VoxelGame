@@ -13,19 +13,6 @@ bool keyDown(GLFWwindow* window, int key) {
 }
 }  // namespace
 
-GlfwClientWindowConfig parseGlfwClientWindowConfig(int argc, char** argv) {
-    GlfwClientWindowConfig config;
-    for (int i = 1; i < argc; ++i) {
-        const std::string arg = argv[i];
-        if (arg == "--fullscreen") {
-            config.fullscreen = true;
-        } else if (arg == "--limit-fps" && i + 1 < argc) {
-            config.swapInterval = std::stoi(argv[++i]);
-        }
-    }
-    return config;
-}
-
 GlfwClientWindow::GlfwClientWindow(const GlfwClientWindowConfig& config) {
     if (!glfwInit()) {
         throw std::runtime_error("Failed to initialize GLFW.");

@@ -275,6 +275,10 @@ if(WIN32)
 endif()
 
 add_executable(VoxelGame
+    src/app/client/ClientNetworkSession.cpp
+    src/app/client/ClientOptions.cpp
+    src/app/client/ClientRuntimeBridge.cpp
+    src/app/client/ClientUiController.cpp
     src/app/client/ClientMain.cpp
 )
 target_link_libraries(VoxelGame PRIVATE

@@ -8,6 +8,10 @@
 #include <string>
 #include <thread>
 
+#include "app/client/ClientNetworkSession.hpp"
+#include "app/client/ClientOptions.hpp"
+#include "app/client/ClientRuntimeBridge.hpp"
+#include "app/client/ClientUiController.hpp"
 #include "common/data/GameData.hpp"
 #include "client/game/Game.hpp"
 #include "common/network/NetworkManager.hpp"
@@ -109,16 +113,9 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    std::string playerName = "Player";
-    for (int i = 1; i < argc; ++i) {
-        const std::string arg = argv[i];
-        if (arg == "--name" && i + 1 < argc) {
-            playerName = argv[++i];
-        }
-    }
-
     try {
-        voxel::GlfwClientWindow window(voxel::parseGlfwClientWindowConfig(argc, argv));
+        const voxel::ClientOptions clientOptions = voxel::parseClientOptions(argc, argv);
+        voxel::GlfwClientWindow window(clientOptions.window);
 
         // ── Pack system ───────────────────────────────────────────────────────
         const std::filesystem::path projectRoot = findClientProjectRoot();
@@ -148,54 +145,19 @@ int main(int argc, char** argv) {
         window.framebufferSize(fbWidth, fbHeight);
 
         voxel::NetworkManager network;
-        voxel::NetworkManager* activeNetwork = nullptr;
-        for (int i = 1; i < argc; ++i) {
-            const std::string arg = argv[i];
-            if (arg == "--host") {
-                const std::uint16_t port =
-                    (i + 1 < argc && argv[i + 1][0] != '-') ? parsePort(argv[++i]) : kDefaultMultiplayerPort;
-                if (network.startServer(port)) {
-                    activeNetwork = &network;
-                }
-            } else if (arg == "--connect") {
-                if (i + 1 >= argc) {
-                    throw std::runtime_error("--connect requires a host name or IP address.");
-                }
-                const std::string hostName = argv[++i];
-                const std::uint16_t port =
-                    (i + 1 < argc && argv[i + 1][0] != '-') ? parsePort(argv[++i]) : kDefaultMultiplayerPort;
-                if (network.connectToServer(hostName, port)) {
-                    activeNetwork = &network;
-                }
-            } else if (arg == "--limit-fps") {
-                if (i + 1 < argc) {
-                    i++; // Already handled above
-                }
-            } else {
-                // Unknown argument or --server (which is handled by runDedicatedServer)
-            }
-        }
+        voxel::NetworkManager* activeNetwork =
+            voxel::startClientNetworkSession(network, clientOptions.network);
 
-        voxel::Game   game(std::move(gameData), assetsRoot, playerName, activeNetwork);
+        voxel::Game   game(std::move(gameData), assetsRoot, clientOptions.playerName, activeNetwork);
         voxel::GameUI ui(window.handle(), fbWidth, fbHeight, assetsRoot);
-
-        const bool runLocalRuntimeScripts =
-            activeNetwork == nullptr || activeNetwork->mode() == voxel::NetworkManager::Mode::Server;
-        if (runLocalRuntimeScripts) {
-            scriptManager.setHostKind(voxel::ScriptHost::Server);
-            scriptManager.setWorldSimulation(&game.simulation());
-            scriptManager.setCurrentPlayer(&game.player());
-            scriptManager.setGameData(&game.gameData());
-            scriptManager.loadRuntimeScripts(packManager);
-        }
+        voxel::ClientRuntimeBridge runtimeBridge(
+            scriptManager, network, activeNetwork, game, ui, clientOptions.playerName);
+        runtimeBridge.loadRuntimeScripts(packManager);
+        voxel::ClientUiController uiController(window, ui);
 
         window.installUiCallbacks(ui);
 
         auto  lastTime   = window.time();
-        bool  escWasDown = false;
-        bool  enterWasDown = false;
-        bool  tWasDown = false;
-        bool  gWasDown = false;
         voxel::GlfwInputCollector inputCollector;
 
         ui.setGameData(&game.gameData());
@@ -211,100 +173,20 @@ int main(int argc, char** argv) {
             const float deltaTime   = std::min(rawDelta, 0.05f);
             lastTime = currentTime;
 
-            auto syncCursorForUI = [&]() {
-                window.setCursorCaptured(!ui.isChatOpen() && !ui.isCraftingOpen());
-            };
-
-            // ESC closes chat if open; otherwise it edge-triggers cursor capture toggle.
-            const bool escDown = window.escapeDown();
-            if (escDown && !escWasDown) {
-                if (ui.isChatOpen()) {
-                    ui.setChatOpen(false);
-                    syncCursorForUI();
-                } else {
-                    window.toggleCursorCaptured();
-                }
-            }
-            escWasDown = escDown;
-
-            // ENTER opens chat; T opens chat.
-            const bool enterDown = window.enterDown();
-            const bool tDown = window.chatToggleDown();
-            if (!ui.isChatOpen() && ((enterDown && !enterWasDown) || (tDown && !tWasDown))) {
-                ui.setChatOpen(true);
-                syncCursorForUI();
-            }
-            enterWasDown = enterDown;
-            tWasDown = tDown;
-
-            // G opens/closes crafting
-            const bool gDown = window.craftingToggleDown();
-            if (gDown && !gWasDown) {
-                ui.setCraftingOpen(!ui.isCraftingOpen());
-                syncCursorForUI();
-            }
-            gWasDown = gDown;
+            uiController.updateToggles();
 
             const voxel::ClientInputFrame inputFrame = inputCollector.poll(window.handle());
             game.update(inputFrame, deltaTime);
 
-            if (runLocalRuntimeScripts) {
-                scriptManager.tick(deltaTime);
-            }
+            runtimeBridge.tick(deltaTime);
 
             // Sync world time from network
             if (auto time = network.takePendingWorldTime()) {
                 game.simulation().setTime(*time);
             }
 
-            // Sync chat between UI and Network
-            std::string chatInput = ui.consumePendingChatInput();
-            if (!chatInput.empty()) {
-                if (activeNetwork) {
-                    activeNetwork->publishChatMessage(chatInput);
-                    if (activeNetwork->mode() == voxel::NetworkManager::Mode::Client &&
-                        (chatInput.empty() || chatInput[0] != '/')) {
-                        ui.addChatMessage(playerName, chatInput);
-                    }
-                } else if (chatInput[0] != '/') {
-                    ui.addChatMessage(playerName, chatInput);
-                } else if (runLocalRuntimeScripts) {
-                    for (const auto& reply : scriptManager.executeCommand(network.localPlayerId(), chatInput)) {
-                        ui.addChatMessage("Server", reply);
-                    }
-                }
-            }
-
-            for (auto& chat : network.takePendingChatMessages()) {
-                if (!chat.message.empty() && chat.message[0] == '/' && runLocalRuntimeScripts) {
-                    for (const auto& reply : scriptManager.executeCommand(chat.playerId, chat.message)) {
-                        if (activeNetwork && activeNetwork->mode() == voxel::NetworkManager::Mode::Server) {
-                            activeNetwork->broadcastChatMessage(0, reply);
-                        }
-                        ui.addChatMessage("Server", reply);
-                    }
-                    continue;
-                }
-
-                std::string sender = "Server";
-                if (chat.playerId == network.localPlayerId()) {
-                    sender = playerName;
-                } else {
-                    auto it = network.remotePlayers().find(chat.playerId);
-                    if (it != network.remotePlayers().end()) {
-                        sender = it->second.name;
-                    } else {
-                        sender = "Player " + std::to_string(chat.playerId);
-                    }
-                }
-                ui.addChatMessage(sender, chat.message);
-            }
-
-            // Sync crafting between UI and Network
-            std::string craftReq = ui.consumePendingCraftRequest();
-            if (!craftReq.empty() && activeNetwork) {
-                activeNetwork->publishCraftRequest(craftReq);
-            }
+            runtimeBridge.syncChat();
+            uiController.syncCrafting(activeNetwork);
 
             ui.setDebugData(game.getDebugData());
             ui.setInventory(game.getInventory());

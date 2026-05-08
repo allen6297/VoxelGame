@@ -45,6 +45,4 @@ private:
     GLFWwindow* window_ = nullptr;
 };
 
-GlfwClientWindowConfig parseGlfwClientWindowConfig(int argc, char** argv);
-
 }  // namespace voxel
