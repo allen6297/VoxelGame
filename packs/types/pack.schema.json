@@ -402,6 +402,13 @@
           "type": "string",
           "description": "Optional human-readable note.",
           "default": ""
+        },
+        "members": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Namespaced ids contained in this tag."
         }
       },
       "required": [

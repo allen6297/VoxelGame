@@ -1,10 +1,47 @@
 /**
  * engine/scripts/03_startup.js
  *
- * Legacy startup API placeholder. Registration is handled exclusively through
- * StartupEvents (04_startup_events.js) and JSON data files under each pack's
- * blocks/ and items/ directories.
- *
- * This file is intentionally empty — the numbering is preserved so that
- * any existing references in documentation remain meaningful.
+ * Tag and localization helpers plus the legacy startup API placeholder.
  */
+
+const Localization = {
+  add(locale, entries) {
+    __locAdd(locale, entries)
+  },
+
+  get(locale, key) {
+    return __locGet(locale, key)
+  },
+}
+
+const Models = {
+  exists(path) {
+    return __modelExists(path)
+  },
+
+  readText(path) {
+    return __modelReadText(path)
+  },
+
+  readJson(path) {
+    return __modelReadJson(path)
+  },
+
+  list(path) {
+    return __modelList(path)
+  },
+}
+
+const Tags = {
+  add(tagId, memberId) {
+    __tagAdd(tagId, memberId)
+  },
+
+  remove(tagId, memberId) {
+    __tagRemove(tagId, memberId)
+  },
+
+  has(tagId, memberId) {
+    return __tagHas(tagId, memberId)
+  },
+}

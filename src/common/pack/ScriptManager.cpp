@@ -16,12 +16,16 @@
 #include <fstream>
 #include <iostream>
 #include <optional>
+#include <unordered_set>
+#include <unordered_map>
 #include <sstream>
 #include <stdexcept>
 #include <string>
 #include <utility>
 
 namespace {
+constexpr const char* kGameVersion = "0.1.0";
+
 static std::string readFile(const std::filesystem::path& path) {
     std::ifstream f(path);
     if (!f) throw std::runtime_error("ScriptManager: cannot open " + path.string());
@@ -111,6 +115,371 @@ std::string sourceSnippet(const std::string& source, const int lineNumber, const
 const char* phaseName(const voxel::ScriptPhase phase) {
     return phase == voxel::ScriptPhase::Startup ? "startup" : "runtime";
 }
+
+const char* hostName(const voxel::ScriptHost host) {
+    switch (host) {
+        case voxel::ScriptHost::Client: return "client";
+        case voxel::ScriptHost::Server: return "server";
+        default: return "unknown";
+    }
+}
+
+std::string joinLogArguments(JSContext* ctx, int argc, JSValueConst* argv) {
+    std::ostringstream ss;
+    for (int i = 0; i < argc; ++i) {
+        if (i > 0) {
+            ss << ' ';
+        }
+        const char* text = JS_ToCString(ctx, argv[i]);
+        if (text) {
+            ss << text;
+            JS_FreeCString(ctx, text);
+        } else {
+            ss << "<unprintable>";
+        }
+    }
+    return ss.str();
+}
+
+bool isNamespacedIdLike(const std::string& value) {
+    const auto colon = value.find(':');
+    return !value.empty() && colon != std::string::npos && colon > 0 && colon + 1 < value.size();
+}
+
+bool isLocaleCodeLike(const std::string& value) {
+    if (value.empty()) {
+        return false;
+    }
+    for (const char ch : value) {
+        if (!(std::isalnum(static_cast<unsigned char>(ch)) || ch == '_' || ch == '-')) {
+            return false;
+        }
+    }
+    return true;
+}
+
+std::string resolveTextureRef(
+    const std::unordered_map<std::string, std::string>& raw,
+    const std::string& ref
+) {
+    std::string current = ref;
+    for (int i = 0; i < 16; ++i) {
+        if (current.empty() || current[0] != '#') {
+            return current;
+        }
+        const auto it = raw.find(current.substr(1));
+        if (it == raw.end()) {
+            return current;
+        }
+        current = it->second;
+    }
+    return current;
+}
+
+std::string assetPath(const std::string& relativePath) {
+    if (relativePath.empty() || relativePath.starts_with("assets/")) {
+        return relativePath;
+    }
+    return "assets/" + relativePath;
+}
+
+JSValue jsonValueToJs(JSContext* ctx, const voxel::JsonValue& value) {
+    if (std::holds_alternative<std::nullptr_t>(value.value)) {
+        return JS_NULL;
+    }
+    if (std::holds_alternative<bool>(value.value)) {
+        return JS_NewBool(ctx, std::get<bool>(value.value));
+    }
+    if (std::holds_alternative<double>(value.value)) {
+        return JS_NewFloat64(ctx, std::get<double>(value.value));
+    }
+    if (std::holds_alternative<std::string>(value.value)) {
+        return JS_NewString(ctx, std::get<std::string>(value.value).c_str());
+    }
+    if (std::holds_alternative<voxel::JsonValue::Object>(value.value)) {
+        JSValue obj = JS_NewObject(ctx);
+        for (const auto& [key, child] : std::get<voxel::JsonValue::Object>(value.value)) {
+            JS_SetPropertyStr(ctx, obj, key.c_str(), jsonValueToJs(ctx, child));
+        }
+        return obj;
+    }
+    if (std::holds_alternative<voxel::JsonValue::Array>(value.value)) {
+        JSValue arr = JS_NewArray(ctx);
+        const auto& array = std::get<voxel::JsonValue::Array>(value.value);
+        for (uint32_t i = 0; i < array.size(); ++i) {
+            JS_SetPropertyUint32(ctx, arr, i, jsonValueToJs(ctx, array[i]));
+        }
+        return arr;
+    }
+    return JS_NULL;
+}
+
+std::vector<std::string> splitCommandArgs(const std::string& input) {
+    std::vector<std::string> parts;
+    std::istringstream stream(input);
+    std::string token;
+    while (stream >> token) {
+        parts.push_back(token);
+    }
+    return parts;
+}
+
+void collectCommandResult(JSContext* ctx, JSValueConst value, std::vector<std::string>& messages) {
+    if (JS_IsUndefined(value) || JS_IsNull(value)) {
+        return;
+    }
+    if (JS_IsString(value)) {
+        const char* text = JS_ToCString(ctx, value);
+        if (text) {
+            messages.emplace_back(text);
+            JS_FreeCString(ctx, text);
+        }
+        return;
+    }
+    if (JS_IsArray(value)) {
+        JSValue lengthValue = JS_GetPropertyStr(ctx, value, "length");
+        uint32_t len = 0;
+        JS_ToUint32(ctx, &len, lengthValue);
+        JS_FreeValue(ctx, lengthValue);
+        for (uint32_t i = 0; i < len; ++i) {
+            JSValue item = JS_GetPropertyUint32(ctx, value, i);
+            collectCommandResult(ctx, item, messages);
+            JS_FreeValue(ctx, item);
+        }
+    }
+}
+
+void validateModelAssetRecursive(
+    const voxel::PackManager& packManager,
+    const std::string& modelPath,
+    std::vector<std::string>& errors,
+    std::unordered_set<std::string>& seenModels,
+    const std::string& context
+) {
+    if (!seenModels.insert(modelPath).second) {
+        return;
+    }
+
+    const auto assetRelativePath = assetPath(modelPath);
+    const auto modelText = packManager.readFile(assetRelativePath);
+    if (!modelText.has_value()) {
+        errors.push_back(context + " references missing model asset: " + modelPath);
+        return;
+    }
+
+    voxel::JsonValue json;
+    try {
+        json = voxel::parseJson(*modelText);
+    } catch (const std::exception& e) {
+        errors.push_back(context + " model " + modelPath + " has invalid JSON: " + e.what());
+        return;
+    }
+
+    if (!json.isObject()) {
+        errors.push_back(context + " model " + modelPath + " must be a JSON object");
+        return;
+    }
+
+    const auto& obj = json.asObject();
+    std::unordered_map<std::string, std::string> rawTextures;
+
+    if (const auto texIt = obj.find("textures"); texIt != obj.end() && texIt->second.isObject()) {
+        for (const auto& [key, val] : texIt->second.asObject()) {
+            if (val.isString()) {
+                rawTextures[key] = val.asString();
+            }
+        }
+    }
+
+    if (const auto parentIt = obj.find("parent"); parentIt != obj.end() && parentIt->second.isString()) {
+        const std::string parentPath = parentIt->second.asString();
+        if (!parentPath.empty()) {
+            validateModelAssetRecursive(
+                packManager,
+                parentPath,
+                errors,
+                seenModels,
+                context + " parent of " + modelPath
+            );
+        }
+    }
+
+    const auto validateTexture = [&](const std::string& textureRef, const std::string& label) {
+        const std::string resolved = resolveTextureRef(rawTextures, textureRef);
+        if (resolved.empty()) {
+            return;
+        }
+        if (resolved == "missing") {
+            return;
+        }
+        if (resolved[0] == '#') {
+            errors.push_back(context + " model " + modelPath + " has unresolved texture reference " + label + ": " + textureRef);
+            return;
+        }
+        if (!packManager.readFile(assetPath(resolved)).has_value()) {
+            errors.push_back(context + " model " + modelPath + " references missing texture " + label + ": " + resolved);
+        }
+    };
+
+    for (const auto& [key, raw] : rawTextures) {
+        validateTexture(raw, "texture " + key);
+    }
+
+    if (const auto elemIt = obj.find("elements"); elemIt != obj.end() && elemIt->second.isArray()) {
+        for (const auto& elemVal : elemIt->second.asArray()) {
+            if (!elemVal.isObject()) {
+                continue;
+            }
+            const auto& elemObj = elemVal.asObject();
+            const auto facesIt = elemObj.find("faces");
+            if (facesIt == elemObj.end() || !facesIt->second.isObject()) {
+                continue;
+            }
+            for (const auto& [faceName, faceVal] : facesIt->second.asObject()) {
+                if (!faceVal.isObject()) {
+                    continue;
+                }
+                const auto& faceObj = faceVal.asObject();
+                const auto textureIt = faceObj.find("texture");
+                if (textureIt != faceObj.end() && textureIt->second.isString()) {
+                    validateTexture(textureIt->second.asString(), "face " + faceName);
+                }
+            }
+        }
+    }
+}
+
+void validateAssetReferences(const voxel::GameData& data, const voxel::PackManager& packManager, std::vector<std::string>& errors) {
+    std::unordered_set<std::string> seenModels;
+
+    const auto validatePath = [&](const std::string& context, const std::string& path) {
+        if (!path.empty() && !packManager.readFile(assetPath(path)).has_value()) {
+            errors.push_back(context + " references missing asset: " + path);
+        }
+    };
+
+    for (const auto& [id, block] : data.blocks) {
+        (void)id;
+        validatePath("block " + block.id + " model", block.modelPath);
+        if (block.modelPath.empty()) {
+            continue;
+        }
+        validateModelAssetRecursive(packManager, block.modelPath, errors, seenModels, "block " + block.id);
+        if (block.textures.albedo.has_value()) {
+            validatePath("block " + block.id + " albedo texture", *block.textures.albedo);
+        }
+        if (block.textures.normal.has_value()) {
+            validatePath("block " + block.id + " normal texture", *block.textures.normal);
+        }
+        if (block.textures.roughness.has_value()) {
+            validatePath("block " + block.id + " roughness texture", *block.textures.roughness);
+        }
+        if (block.textures.emissive.has_value()) {
+            validatePath("block " + block.id + " emissive texture", *block.textures.emissive);
+        }
+    }
+
+    for (const auto& [stateId, modelPath] : data.stateModelPathById) {
+        const auto blockIt = data.blockIdByStateId.find(stateId);
+        const std::string blockId = blockIt != data.blockIdByStateId.end() ? blockIt->second : std::string{};
+        const std::string context = blockId.empty() ? "block state " + std::to_string(stateId)
+                                                    : "block state " + blockId;
+        validatePath(context + " model", modelPath);
+        if (!modelPath.empty()) {
+            validateModelAssetRecursive(packManager, modelPath, errors, seenModels, context);
+        }
+    }
+
+    for (const auto& [id, item] : data.items) {
+        (void)id;
+        validatePath("item " + item.id + " icon", item.icon);
+    }
+}
+
+voxel::ScriptManager::ScriptTimer* findTimer(std::vector<voxel::ScriptManager::ScriptTimer>& timers, std::uint64_t id) {
+    for (auto& timer : timers) {
+        if (timer.id == id) {
+            return &timer;
+        }
+    }
+    return nullptr;
+}
+
+voxel::TagDefinition* findPendingTag(std::vector<voxel::TagDefinition>& tags, const std::string& id);
+const voxel::TagDefinition* findLoadedTag(const voxel::GameData* gameData, const std::string& id);
+const voxel::BlockDefinition* findLoadedBlock(const voxel::GameData* gameData, const std::string& id);
+const voxel::ItemDefinition* findLoadedItem(const voxel::GameData* gameData, const std::string& id);
+const voxel::BiomeDefinition* findLoadedBiome(const voxel::GameData* gameData, const std::string& id);
+const voxel::RecipeDefinition* findLoadedRecipe(const voxel::GameData* gameData, const std::string& id);
+void mergeTagDefinition(voxel::TagDefinition& destination, const voxel::TagDefinition& source);
+bool isTagMemberRegistered(const voxel::TagDefinition& tag, const std::string& member);
+
+voxel::TagDefinition* findPendingTag(std::vector<voxel::TagDefinition>& tags, const std::string& id) {
+    for (auto& tag : tags) {
+        if (tag.id == id) {
+            return &tag;
+        }
+    }
+    return nullptr;
+}
+
+const voxel::TagDefinition* findLoadedTag(const voxel::GameData* gameData, const std::string& id) {
+    if (!gameData) {
+        return nullptr;
+    }
+    const auto it = gameData->tags.find(id);
+    if (it == gameData->tags.end()) {
+        return nullptr;
+    }
+    return &it->second;
+}
+
+const voxel::BlockDefinition* findLoadedBlock(const voxel::GameData* gameData, const std::string& id) {
+    if (!gameData) {
+        return nullptr;
+    }
+    const auto it = gameData->blocks.find(id);
+    return it == gameData->blocks.end() ? nullptr : &it->second;
+}
+
+const voxel::ItemDefinition* findLoadedItem(const voxel::GameData* gameData, const std::string& id) {
+    if (!gameData) {
+        return nullptr;
+    }
+    const auto it = gameData->items.find(id);
+    return it == gameData->items.end() ? nullptr : &it->second;
+}
+
+const voxel::BiomeDefinition* findLoadedBiome(const voxel::GameData* gameData, const std::string& id) {
+    if (!gameData) {
+        return nullptr;
+    }
+    const auto it = gameData->biomes.find(id);
+    return it == gameData->biomes.end() ? nullptr : &it->second;
+}
+
+const voxel::RecipeDefinition* findLoadedRecipe(const voxel::GameData* gameData, const std::string& id) {
+    if (!gameData) {
+        return nullptr;
+    }
+    const auto it = gameData->recipes.find(id);
+    return it == gameData->recipes.end() ? nullptr : &it->second;
+}
+
+void mergeTagDefinition(voxel::TagDefinition& destination, const voxel::TagDefinition& source) {
+    if (!source.description.empty()) {
+        destination.description = source.description;
+    }
+    for (const auto& member : source.members) {
+        if (std::find(destination.members.begin(), destination.members.end(), member) == destination.members.end()) {
+            destination.members.push_back(member);
+        }
+    }
+}
+
+bool isTagMemberRegistered(const voxel::TagDefinition& tag, const std::string& member) {
+    return std::find(tag.members.begin(), tag.members.end(), member) != tag.members.end();
+}
 }  // namespace
 
 namespace voxel {
@@ -133,6 +502,12 @@ ScriptManager::ScriptManager() {
 }
 
 ScriptManager::~ScriptManager() {
+    for (auto& timer : timers_) {
+        JS_FreeValue(context_, timer.callback);
+    }
+    for (auto& command : pendingCommands_) {
+        JS_FreeValue(context_, command.handler);
+    }
     if (context_) JS_FreeContext(context_);
     if (runtime_) JS_FreeRuntime(runtime_);
 }
@@ -142,6 +517,7 @@ ScriptManager::~ScriptManager() {
 GameData ScriptManager::loadGameData(const PackManager& packManager,
                                      const std::filesystem::path& engineScriptsPath) {
     engineScriptsPath_ = engineScriptsPath;
+    packManager_ = &packManager;
     currentPhase_ = ScriptPhase::Startup;
 
     // Execute engine scripts first (defines StartupEvents, Registry, etc.) in sorted order.
@@ -213,12 +589,27 @@ GameData ScriptManager::loadGameData(const PackManager& packManager,
     for (auto& i  : pendingItems_)       insertUnique(data.items,        std::move(i),  "item");
     for (auto& bi : pendingBiomes_)      insertUnique(data.biomes,       std::move(bi), "biome");
     for (auto& t  : pendingTags_)        data.tags.insert_or_assign(t.id, std::move(t));
+    for (auto& [locale, entries] : pendingLocalizations_) {
+        auto& dest = data.localizations[locale];
+        for (auto& [key, value] : entries) {
+            dest.insert_or_assign(key, std::move(value));
+        }
+    }
     for (auto& bs : pendingBlockStates_) insertUnique(data.blockStates,   std::move(bs), "block state");
     for (auto& r  : pendingRecipes_)     insertUnique(data.recipes,      std::move(r),  "recipe");
 
     validateGameData(data);
-
     finalizeGameData(data);
+    std::vector<std::string> assetErrors;
+    validateAssetReferences(data, packManager, assetErrors);
+    if (!assetErrors.empty()) {
+        std::ostringstream stream;
+        stream << "[Pack Validation Error]\n";
+        for (const auto& error : assetErrors) {
+            stream << error << '\n';
+        }
+        throw std::runtime_error(stream.str());
+    }
     return data;
 }
 
@@ -236,12 +627,44 @@ void ScriptManager::setupGlobals() {
     setFn("__registerBlock", jsRegisterBlock);
     setFn("__registerItem",  jsRegisterItem);
     setFn("__registerBiome", jsRegisterBiome);
+    setFn("__registerRecipe", jsRegisterRecipe);
     setFn("__registerTag",   jsRegisterTag);
     setFn("__getBlock",      jsGetBlock);
     setFn("__getItem",       jsGetItem);
     setFn("__getBiome",      jsGetBiome);
     setFn("__getTag",        jsGetTag);
     setFn("__modifyBlock",   jsModifyBlock);
+    setFn("__logInfo",       jsLogInfo);
+    setFn("__logWarn",       jsLogWarn);
+    setFn("__logError",      jsLogError);
+    setFn("__platform_isClient",      jsPlatformIsClient);
+    setFn("__platform_isServer",      jsPlatformIsServer);
+    setFn("__platform_isDevelopment", jsPlatformIsDevelopment);
+    setFn("__platform_getGameVersion", jsPlatformGetGameVersion);
+    setFn("__platform_isPackLoaded",   jsPlatformIsPackLoaded);
+    setFn("__resourceExists",         jsResourceExists);
+    setFn("__resourceReadText",       jsResourceReadText);
+    setFn("__resourceList",           jsResourceList);
+    setFn("__tagAdd",    jsTagAdd);
+    setFn("__tagRemove",  jsTagRemove);
+    setFn("__tagHas",     jsTagHas);
+    setFn("__locAdd",     jsLocalizationAdd);
+    setFn("__locGet",     jsLocalizationGet);
+    setFn("__dataGetBlock",        jsDataGetBlock);
+    setFn("__dataGetItem",         jsDataGetItem);
+    setFn("__dataGetBiome",        jsDataGetBiome);
+    setFn("__dataGetTag",          jsDataGetTag);
+    setFn("__dataGetRecipe",       jsDataGetRecipe);
+    setFn("__dataGetLocalization", jsDataGetLocalization);
+    setFn("__timerSetTimeout",     jsTimerSetTimeout);
+    setFn("__timerSetInterval",    jsTimerSetInterval);
+    setFn("__timerClear",          jsTimerClear);
+    setFn("__commandRegister",     jsCommandRegister);
+    setFn("__commandList",         jsCommandList);
+    setFn("__modelExists",         jsModelExists);
+    setFn("__modelReadText",       jsModelReadText);
+    setFn("__modelReadJson",       jsModelReadJson);
+    setFn("__modelList",           jsModelList);
 
     // Runtime World
     setFn("__world_getBlock", jsWorldGetBlock);
@@ -532,6 +955,35 @@ JSValue ScriptManager::jsRegisterBiome(JSContext* ctx, JSValueConst, int argc, J
     return JS_UNDEFINED;
 }
 
+JSValue ScriptManager::jsRegisterRecipe(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv) {
+    auto* self = static_cast<ScriptManager*>(JS_GetContextOpaque(ctx));
+    if (!self || !self->requirePhase(ctx, ScriptPhase::Startup, "Recipes.register")) {
+        return JS_EXCEPTION;
+    }
+    if (argc < 1 || !JS_IsObject(argv[0])) {
+        return JS_ThrowTypeError(ctx, "Recipes.register: expected an object argument");
+    }
+
+    RecipeDefinition recipe;
+    try {
+        recipe = voxel::generated::parseRecipeDefinition(ctx, argv[0]);
+    } catch (const std::exception& e) {
+        return JS_ThrowTypeError(ctx, "Recipes.register: %s", e.what());
+    }
+    if (recipe.id.empty()) {
+        return JS_ThrowTypeError(ctx, "Recipes.register: recipe must have an 'id' field");
+    }
+
+    auto it = std::find_if(self->pendingRecipes_.begin(), self->pendingRecipes_.end(),
+                           [&](const RecipeDefinition& pending) { return pending.id == recipe.id; });
+    if (it == self->pendingRecipes_.end()) {
+        self->pendingRecipes_.push_back(std::move(recipe));
+    } else {
+        *it = std::move(recipe);
+    }
+    return JS_UNDEFINED;
+}
+
 JSValue ScriptManager::jsRegisterTag(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv) {
     auto* self = static_cast<ScriptManager*>(JS_GetContextOpaque(ctx));
     if (!self || !self->requirePhase(ctx, ScriptPhase::Startup, "StartupEvents.registry(\"tag\")")) {
@@ -557,7 +1009,11 @@ JSValue ScriptManager::jsRegisterTag(JSContext* ctx, JSValueConst, int argc, JSV
         JS_FreeValue(ctx, obj);
         if (tag.id.empty() || tag.id.find(':') == std::string::npos)
             return JS_ThrowTypeError(ctx, "__registerTag: id must be namespaced (e.g. \"base:flammable\")");
-        self->pendingTags_.push_back(std::move(tag));
+        if (TagDefinition* existing = findPendingTag(self->pendingTags_, tag.id)) {
+            mergeTagDefinition(*existing, tag);
+        } else {
+            self->pendingTags_.push_back(std::move(tag));
+        }
         return JS_UNDEFINED;
     } else if (JS_IsObject(argv[0])) {
         TagDefinition tag;
@@ -568,7 +1024,11 @@ JSValue ScriptManager::jsRegisterTag(JSContext* ctx, JSValueConst, int argc, JSV
         }
         if (tag.id.empty() || tag.id.find(':') == std::string::npos)
             return JS_ThrowTypeError(ctx, "__registerTag: id must be namespaced (e.g. \"base:flammable\")");
-        self->pendingTags_.push_back(std::move(tag));
+        if (TagDefinition* existing = findPendingTag(self->pendingTags_, tag.id)) {
+            mergeTagDefinition(*existing, tag);
+        } else {
+            self->pendingTags_.push_back(std::move(tag));
+        }
         return JS_UNDEFINED;
     } else {
         return JS_ThrowTypeError(ctx, "__registerTag: expected a string id or {id, description} object");
@@ -585,14 +1045,20 @@ JSValue ScriptManager::jsGetTag(JSContext* ctx, JSValueConst, int argc, JSValueC
     JS_FreeCString(ctx, id);
 
     auto* self = static_cast<ScriptManager*>(JS_GetContextOpaque(ctx));
-    for (auto it = self->pendingTags_.rbegin(); it != self->pendingTags_.rend(); ++it) {
-        const auto& t = *it;
-        if (t.id == tagId) {
-            JSValue obj = JS_NewObject(ctx);
-            JS_SetPropertyStr(ctx, obj, "id",          JS_NewString(ctx, t.id.c_str()));
-            JS_SetPropertyStr(ctx, obj, "description", JS_NewString(ctx, t.description.c_str()));
-            return obj;
+    const TagDefinition* tag = self->gameData_ ? findLoadedTag(self->gameData_, tagId) : nullptr;
+    if (!tag) {
+        tag = findPendingTag(self->pendingTags_, tagId);
+    }
+    if (tag) {
+        JSValue obj = JS_NewObject(ctx);
+        JS_SetPropertyStr(ctx, obj, "id",          JS_NewString(ctx, tag->id.c_str()));
+        JS_SetPropertyStr(ctx, obj, "description", JS_NewString(ctx, tag->description.c_str()));
+        JSValue members = JS_NewArray(ctx);
+        for (uint32_t i = 0; i < tag->members.size(); ++i) {
+            JS_SetPropertyUint32(ctx, members, i, JS_NewString(ctx, tag->members[i].c_str()));
         }
+        JS_SetPropertyStr(ctx, obj, "members", members);
+        return obj;
     }
     return JS_NULL;
 }
@@ -641,6 +1107,159 @@ JSValue ScriptManager::jsGetBiome(JSContext* ctx, JSValueConst, int argc, JSValu
     auto* self = static_cast<ScriptManager*>(JS_GetContextOpaque(ctx));
     for (const auto& b : self->pendingBiomes_) {
         if (b.id == biomeId) return self->biomeToJs(b);
+    }
+    return JS_NULL;
+}
+
+JSValue ScriptManager::jsDataGetBlock(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv) {
+    if (argc < 1) {
+        return JS_ThrowTypeError(ctx, "Data.getBlock: expected a block ID string");
+    }
+
+    const char* id = JS_ToCString(ctx, argv[0]);
+    if (!id) return JS_NULL;
+    std::string blockId(id);
+    JS_FreeCString(ctx, id);
+
+    auto* self = static_cast<ScriptManager*>(JS_GetContextOpaque(ctx));
+    if (!self) {
+        return JS_NULL;
+    }
+    if (const BlockDefinition* block = findLoadedBlock(self ? self->gameData_ : nullptr, blockId)) {
+        return self->blockToJs(*block);
+    }
+    for (const auto& b : self->pendingBlocks_) {
+        if (b.id == blockId) return self->blockToJs(b);
+    }
+    return JS_NULL;
+}
+
+JSValue ScriptManager::jsDataGetItem(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv) {
+    if (argc < 1) {
+        return JS_ThrowTypeError(ctx, "Data.getItem: expected an item ID string");
+    }
+
+    const char* id = JS_ToCString(ctx, argv[0]);
+    if (!id) return JS_NULL;
+    std::string itemId(id);
+    JS_FreeCString(ctx, id);
+
+    auto* self = static_cast<ScriptManager*>(JS_GetContextOpaque(ctx));
+    if (!self) {
+        return JS_NULL;
+    }
+    if (const ItemDefinition* item = findLoadedItem(self ? self->gameData_ : nullptr, itemId)) {
+        return self->itemToJs(*item);
+    }
+    for (const auto& i : self->pendingItems_) {
+        if (i.id == itemId) return self->itemToJs(i);
+    }
+    return JS_NULL;
+}
+
+JSValue ScriptManager::jsDataGetBiome(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv) {
+    if (argc < 1) {
+        return JS_ThrowTypeError(ctx, "Data.getBiome: expected a biome ID string");
+    }
+
+    const char* id = JS_ToCString(ctx, argv[0]);
+    if (!id) return JS_NULL;
+    std::string biomeId(id);
+    JS_FreeCString(ctx, id);
+
+    auto* self = static_cast<ScriptManager*>(JS_GetContextOpaque(ctx));
+    if (!self) {
+        return JS_NULL;
+    }
+    if (const BiomeDefinition* biome = findLoadedBiome(self ? self->gameData_ : nullptr, biomeId)) {
+        return self->biomeToJs(*biome);
+    }
+    for (const auto& b : self->pendingBiomes_) {
+        if (b.id == biomeId) return self->biomeToJs(b);
+    }
+    return JS_NULL;
+}
+
+JSValue ScriptManager::jsDataGetTag(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv) {
+    return jsGetTag(ctx, JS_UNDEFINED, argc, argv);
+}
+
+JSValue ScriptManager::jsDataGetRecipe(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv) {
+    if (argc < 1) {
+        return JS_ThrowTypeError(ctx, "Data.getRecipe: expected a recipe ID string");
+    }
+
+    const char* id = JS_ToCString(ctx, argv[0]);
+    if (!id) return JS_NULL;
+    std::string recipeId(id);
+    JS_FreeCString(ctx, id);
+
+    auto* self = static_cast<ScriptManager*>(JS_GetContextOpaque(ctx));
+    if (!self) {
+        return JS_NULL;
+    }
+    const RecipeDefinition* recipe = findLoadedRecipe(self ? self->gameData_ : nullptr, recipeId);
+    if (!recipe) {
+        const auto it = std::find_if(self->pendingRecipes_.begin(), self->pendingRecipes_.end(),
+                                     [&](const RecipeDefinition& pending) { return pending.id == recipeId; });
+        if (it != self->pendingRecipes_.end()) {
+            recipe = &*it;
+        }
+    }
+    if (!recipe) {
+        return JS_NULL;
+    }
+
+    JSValue obj = JS_NewObject(ctx);
+    JS_SetPropertyStr(ctx, obj, "id", JS_NewString(ctx, recipe->id.c_str()));
+    JS_SetPropertyStr(ctx, obj, "type", JS_NewString(ctx, recipe->type.c_str()));
+    JS_SetPropertyStr(ctx, obj, "output", JS_NewString(ctx, recipe->output.c_str()));
+    JS_SetPropertyStr(ctx, obj, "count", JS_NewInt32(ctx, recipe->count));
+    JSValue ingredients = JS_NewArray(ctx);
+    for (uint32_t i = 0; i < recipe->ingredients.size(); ++i) {
+        JS_SetPropertyUint32(ctx, ingredients, i, JS_NewString(ctx, recipe->ingredients[i].c_str()));
+    }
+    JS_SetPropertyStr(ctx, obj, "ingredients", ingredients);
+    return obj;
+}
+
+JSValue ScriptManager::jsDataGetLocalization(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv) {
+    if (argc < 2) {
+        return JS_ThrowTypeError(ctx, "Data.getLocalization: expected (locale, key)");
+    }
+
+    const char* localeText = JS_ToCString(ctx, argv[0]);
+    const char* keyText = JS_ToCString(ctx, argv[1]);
+    if (!localeText || !keyText) {
+        JS_FreeCString(ctx, localeText);
+        JS_FreeCString(ctx, keyText);
+        return JS_NULL;
+    }
+    std::string locale(localeText);
+    std::string key(keyText);
+    JS_FreeCString(ctx, localeText);
+    JS_FreeCString(ctx, keyText);
+
+    auto* self = static_cast<ScriptManager*>(JS_GetContextOpaque(ctx));
+    if (!self) {
+        return JS_NULL;
+    }
+    const auto findValue = [&](const auto& source) -> const std::string* {
+        const auto localeIt = source.find(locale);
+        if (localeIt == source.end()) {
+            return nullptr;
+        }
+        const auto entryIt = localeIt->second.find(key);
+        return entryIt == localeIt->second.end() ? nullptr : &entryIt->second;
+    };
+
+    if (self) {
+        if (const auto* pending = findValue(self->pendingLocalizations_)) {
+            return JS_NewString(ctx, pending->c_str());
+        }
+        if (const auto* loaded = findValue(self->gameData_ ? self->gameData_->localizations : decltype(self->pendingLocalizations_){ })) {
+            return JS_NewString(ctx, loaded->c_str());
+        }
     }
     return JS_NULL;
 }
@@ -1070,8 +1689,438 @@ JSValue ScriptManager::jsPlayerGetInventory(JSContext* ctx, JSValueConst, int, J
     return arr;
 }
 
+JSValue ScriptManager::jsLogInfo(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv) {
+    std::cout << "[Logger][info] " << joinLogArguments(ctx, argc, argv) << '\n';
+    return JS_UNDEFINED;
+}
+
+JSValue ScriptManager::jsLogWarn(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv) {
+    std::cerr << "[Logger][warn] " << joinLogArguments(ctx, argc, argv) << '\n';
+    return JS_UNDEFINED;
+}
+
+JSValue ScriptManager::jsLogError(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv) {
+    std::cerr << "[Logger][error] " << joinLogArguments(ctx, argc, argv) << '\n';
+    return JS_UNDEFINED;
+}
+
+JSValue ScriptManager::jsPlatformIsClient(JSContext* ctx, JSValueConst, int, JSValueConst*) {
+    auto* self = static_cast<ScriptManager*>(JS_GetContextOpaque(ctx));
+    return JS_NewBool(ctx, self && self->host_ == ScriptHost::Client);
+}
+
+JSValue ScriptManager::jsPlatformIsServer(JSContext* ctx, JSValueConst, int, JSValueConst*) {
+    auto* self = static_cast<ScriptManager*>(JS_GetContextOpaque(ctx));
+    return JS_NewBool(ctx, self && self->host_ == ScriptHost::Server);
+}
+
+JSValue ScriptManager::jsPlatformIsDevelopment(JSContext* ctx, JSValueConst, int, JSValueConst*) {
+#ifdef NDEBUG
+    return JS_NewBool(ctx, false);
+#else
+    return JS_NewBool(ctx, true);
+#endif
+}
+
+JSValue ScriptManager::jsPlatformGetGameVersion(JSContext* ctx, JSValueConst, int, JSValueConst*) {
+    return JS_NewString(ctx, kGameVersion);
+}
+
+JSValue ScriptManager::jsPlatformIsPackLoaded(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv) {
+    auto* self = static_cast<ScriptManager*>(JS_GetContextOpaque(ctx));
+    if (!self || !self->packManager_ || argc < 1 || !JS_IsString(argv[0])) {
+        return JS_FALSE;
+    }
+
+    const char* id = JS_ToCString(ctx, argv[0]);
+    const bool loaded = id && self->packManager_->findPack(id) != nullptr;
+    JS_FreeCString(ctx, id);
+    return JS_NewBool(ctx, loaded);
+}
+
+JSValue ScriptManager::jsResourceExists(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv) {
+    auto* self = static_cast<ScriptManager*>(JS_GetContextOpaque(ctx));
+    if (!self || !self->packManager_ || argc < 1 || !JS_IsString(argv[0])) {
+        return JS_FALSE;
+    }
+
+    const char* path = JS_ToCString(ctx, argv[0]);
+    const bool exists = path && self->packManager_->readFile(path).has_value();
+    JS_FreeCString(ctx, path);
+    return JS_NewBool(ctx, exists);
+}
+
+JSValue ScriptManager::jsResourceReadText(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv) {
+    auto* self = static_cast<ScriptManager*>(JS_GetContextOpaque(ctx));
+    if (!self || !self->packManager_ || argc < 1 || !JS_IsString(argv[0])) {
+        return JS_NULL;
+    }
+
+    const char* path = JS_ToCString(ctx, argv[0]);
+    const auto text = path ? self->packManager_->readFile(path) : std::nullopt;
+    JS_FreeCString(ctx, path);
+    if (!text.has_value()) {
+        return JS_NULL;
+    }
+    return JS_NewString(ctx, text->c_str());
+}
+
+JSValue ScriptManager::jsResourceList(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv) {
+    auto* self = static_cast<ScriptManager*>(JS_GetContextOpaque(ctx));
+    if (!self || !self->packManager_ || argc < 1 || !JS_IsString(argv[0])) {
+        return JS_NewArray(ctx);
+    }
+
+    const char* path = JS_ToCString(ctx, argv[0]);
+    const auto files = path ? self->packManager_->listFiles(path) : std::vector<std::string>{};
+    JS_FreeCString(ctx, path);
+
+    JSValue arr = JS_NewArray(ctx);
+    for (uint32_t i = 0; i < files.size(); ++i) {
+        JS_SetPropertyUint32(ctx, arr, i, JS_NewString(ctx, files[i].c_str()));
+    }
+    return arr;
+}
+
+JSValue ScriptManager::jsLocalizationAdd(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv) {
+    auto* self = static_cast<ScriptManager*>(JS_GetContextOpaque(ctx));
+    if (!self || !self->requirePhase(ctx, ScriptPhase::Startup, "Localization.add")) {
+        return JS_EXCEPTION;
+    }
+    if (argc < 2 || !JS_IsString(argv[0]) || !JS_IsObject(argv[1])) {
+        return JS_ThrowTypeError(ctx, "Localization.add: expected (locale, entriesObject)");
+    }
+
+    const char* localeC = JS_ToCString(ctx, argv[0]);
+    const std::string locale = localeC ? localeC : "";
+    JS_FreeCString(ctx, localeC);
+    if (!isLocaleCodeLike(locale)) {
+        return JS_ThrowTypeError(ctx, "Localization.add: invalid locale code");
+    }
+
+    auto& dest = self->pendingLocalizations_[locale];
+    js::jsForEachProp(ctx, argv[1], [&](const char* key, JSValue val) {
+        const char* text = JS_ToCString(ctx, val);
+        if (key && text) {
+            dest[key] = text;
+        }
+        JS_FreeCString(ctx, text);
+    });
+    return JS_UNDEFINED;
+}
+
+JSValue ScriptManager::jsLocalizationGet(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv) {
+    auto* self = static_cast<ScriptManager*>(JS_GetContextOpaque(ctx));
+    if (!self || argc < 2 || !JS_IsString(argv[0]) || !JS_IsString(argv[1])) {
+        return JS_NULL;
+    }
+
+    const char* localeC = JS_ToCString(ctx, argv[0]);
+    const char* keyC = JS_ToCString(ctx, argv[1]);
+    const std::string locale = localeC ? localeC : "";
+    const std::string key = keyC ? keyC : "";
+    JS_FreeCString(ctx, localeC);
+    JS_FreeCString(ctx, keyC);
+    if (!isLocaleCodeLike(locale) || key.empty()) {
+        return JS_NULL;
+    }
+
+    const auto findValue = [&](const auto& table) -> std::optional<std::string> {
+        const auto localeIt = table.find(locale);
+        if (localeIt == table.end()) {
+            return std::nullopt;
+        }
+        const auto valueIt = localeIt->second.find(key);
+        if (valueIt == localeIt->second.end()) {
+            return std::nullopt;
+        }
+        return valueIt->second;
+    };
+
+    if (const auto pending = findValue(self->pendingLocalizations_)) {
+        return JS_NewString(ctx, pending->c_str());
+    }
+    if (self->gameData_) {
+        if (const auto loaded = findValue(self->gameData_->localizations)) {
+            return JS_NewString(ctx, loaded->c_str());
+        }
+    }
+    return JS_NULL;
+}
+
+JSValue ScriptManager::jsTimerSetTimeout(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv) {
+    auto* self = static_cast<ScriptManager*>(JS_GetContextOpaque(ctx));
+    if (!self || !self->requirePhase(ctx, ScriptPhase::Runtime, "Timers.setTimeout")) {
+        return JS_EXCEPTION;
+    }
+    if (argc < 1 || !JS_IsFunction(ctx, argv[0])) {
+        return JS_ThrowTypeError(ctx, "Timers.setTimeout: expected (callback, delayMs?)");
+    }
+
+    double delayMs = 0.0;
+    if (argc >= 2) {
+        JS_ToFloat64(ctx, &delayMs, argv[1]);
+    }
+    ScriptManager::ScriptTimer timer;
+    timer.id = self->nextTimerId_++;
+    timer.callback = JS_DupValue(ctx, argv[0]);
+    timer.dueTime = self->runtimeTimeSeconds_ + std::max(0.0, delayMs) / 1000.0;
+    timer.repeating = false;
+    self->timers_.push_back(timer);
+    return JS_NewInt64(ctx, static_cast<std::int64_t>(timer.id));
+}
+
+JSValue ScriptManager::jsTimerSetInterval(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv) {
+    auto* self = static_cast<ScriptManager*>(JS_GetContextOpaque(ctx));
+    if (!self || !self->requirePhase(ctx, ScriptPhase::Runtime, "Timers.setInterval")) {
+        return JS_EXCEPTION;
+    }
+    if (argc < 1 || !JS_IsFunction(ctx, argv[0])) {
+        return JS_ThrowTypeError(ctx, "Timers.setInterval: expected (callback, intervalMs)");
+    }
+
+    double intervalMs = 0.0;
+    if (argc >= 2) {
+        JS_ToFloat64(ctx, &intervalMs, argv[1]);
+    }
+    const double intervalSeconds = std::max(0.0, intervalMs) / 1000.0;
+    if (intervalSeconds <= 0.0) {
+        return JS_ThrowRangeError(ctx, "Timers.setInterval: interval must be positive");
+    }
+
+    ScriptManager::ScriptTimer timer;
+    timer.id = self->nextTimerId_++;
+    timer.callback = JS_DupValue(ctx, argv[0]);
+    timer.dueTime = self->runtimeTimeSeconds_ + intervalSeconds;
+    timer.interval = intervalSeconds;
+    timer.repeating = true;
+    self->timers_.push_back(timer);
+    return JS_NewInt64(ctx, static_cast<std::int64_t>(timer.id));
+}
+
+JSValue ScriptManager::jsTimerClear(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv) {
+    auto* self = static_cast<ScriptManager*>(JS_GetContextOpaque(ctx));
+    if (!self || !self->requirePhase(ctx, ScriptPhase::Runtime, "Timers.clear")) {
+        return JS_EXCEPTION;
+    }
+    if (argc < 1) {
+        return JS_ThrowTypeError(ctx, "Timers.clear: expected a timer id");
+    }
+
+    std::int64_t id = 0;
+    if (JS_ToInt64(ctx, &id, argv[0]) < 0) {
+        return JS_EXCEPTION;
+    }
+    for (auto& timer : self->timers_) {
+        if (timer.id == static_cast<std::uint64_t>(id)) {
+            timer.cancelled = true;
+            break;
+        }
+    }
+    return JS_UNDEFINED;
+}
+
+JSValue ScriptManager::jsCommandRegister(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv) {
+    auto* self = static_cast<ScriptManager*>(JS_GetContextOpaque(ctx));
+    if (!self || !self->requirePhase(ctx, ScriptPhase::Runtime, "Commands.register")) {
+        return JS_EXCEPTION;
+    }
+    if (argc < 2 || !JS_IsString(argv[0]) || !JS_IsFunction(ctx, argv[1])) {
+        return JS_ThrowTypeError(ctx, "Commands.register: expected (name, handler)");
+    }
+
+    const char* nameC = JS_ToCString(ctx, argv[0]);
+    const std::string name = nameC ? nameC : "";
+    JS_FreeCString(ctx, nameC);
+    if (name.empty()) {
+        return JS_ThrowTypeError(ctx, "Commands.register: name must be non-empty");
+    }
+
+    auto it = std::find_if(self->pendingCommands_.begin(), self->pendingCommands_.end(),
+                           [&](const CommandEntry& entry) { return entry.name == name; });
+    if (it != self->pendingCommands_.end()) {
+        JS_FreeValue(ctx, it->handler);
+        it->handler = JS_DupValue(ctx, argv[1]);
+    } else {
+        self->pendingCommands_.push_back(CommandEntry{name, JS_DupValue(ctx, argv[1])});
+    }
+    return JS_UNDEFINED;
+}
+
+JSValue ScriptManager::jsCommandList(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv) {
+    auto* self = static_cast<ScriptManager*>(JS_GetContextOpaque(ctx));
+    if (!self || !self->requirePhase(ctx, ScriptPhase::Runtime, "Commands.list")) {
+        return JS_EXCEPTION;
+    }
+    if (argc > 0) {
+        return JS_ThrowTypeError(ctx, "Commands.list: expected no arguments");
+    }
+
+    JSValue arr = JS_NewArray(ctx);
+    for (uint32_t i = 0; i < self->pendingCommands_.size(); ++i) {
+        JS_SetPropertyUint32(ctx, arr, i, JS_NewString(ctx, self->pendingCommands_[i].name.c_str()));
+    }
+    return arr;
+}
+
+JSValue ScriptManager::jsModelExists(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv) {
+    auto* self = static_cast<ScriptManager*>(JS_GetContextOpaque(ctx));
+    if (!self || !self->packManager_ || argc < 1 || !JS_IsString(argv[0])) {
+        return JS_NewBool(ctx, false);
+    }
+
+    const char* path = JS_ToCString(ctx, argv[0]);
+    const bool exists = path && self->packManager_->readFile(assetPath(path)).has_value();
+    JS_FreeCString(ctx, path);
+    return JS_NewBool(ctx, exists);
+}
+
+JSValue ScriptManager::jsModelReadText(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv) {
+    auto* self = static_cast<ScriptManager*>(JS_GetContextOpaque(ctx));
+    if (!self || !self->packManager_ || argc < 1 || !JS_IsString(argv[0])) {
+        return JS_NULL;
+    }
+
+    const char* path = JS_ToCString(ctx, argv[0]);
+    const auto text = path ? self->packManager_->readFile(assetPath(path)) : std::nullopt;
+    JS_FreeCString(ctx, path);
+    if (!text.has_value()) {
+        return JS_NULL;
+    }
+    return JS_NewString(ctx, text->c_str());
+}
+
+JSValue ScriptManager::jsModelReadJson(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv) {
+    auto* self = static_cast<ScriptManager*>(JS_GetContextOpaque(ctx));
+    if (!self || !self->packManager_ || argc < 1 || !JS_IsString(argv[0])) {
+        return JS_NULL;
+    }
+
+    const char* path = JS_ToCString(ctx, argv[0]);
+    const auto text = path ? self->packManager_->readFile(assetPath(path)) : std::nullopt;
+    JS_FreeCString(ctx, path);
+    if (!text.has_value()) {
+        return JS_NULL;
+    }
+
+    try {
+        voxel::JsonValue json = voxel::parseJson(*text);
+        return jsonValueToJs(ctx, json);
+    } catch (const std::exception&) {
+        return JS_NULL;
+    }
+}
+
+JSValue ScriptManager::jsModelList(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv) {
+    auto* self = static_cast<ScriptManager*>(JS_GetContextOpaque(ctx));
+    if (!self || !self->packManager_ || argc < 1 || !JS_IsString(argv[0])) {
+        return JS_NewArray(ctx);
+    }
+
+    const char* path = JS_ToCString(ctx, argv[0]);
+    const auto files = path ? self->packManager_->listFiles(assetPath(path)) : std::vector<std::string>{};
+    JS_FreeCString(ctx, path);
+
+    JSValue arr = JS_NewArray(ctx);
+    for (uint32_t i = 0; i < files.size(); ++i) {
+        JS_SetPropertyUint32(ctx, arr, i, JS_NewString(ctx, files[i].c_str()));
+    }
+    return arr;
+}
+
+JSValue ScriptManager::jsTagAdd(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv) {
+    auto* self = static_cast<ScriptManager*>(JS_GetContextOpaque(ctx));
+    if (!self || !self->requirePhase(ctx, ScriptPhase::Startup, "Tags.add")) {
+        return JS_EXCEPTION;
+    }
+    if (argc < 2 || !JS_IsString(argv[0]) || !JS_IsString(argv[1])) {
+        return JS_ThrowTypeError(ctx, "Tags.add: expected (tagId, memberId)");
+    }
+
+    const char* tagIdC = JS_ToCString(ctx, argv[0]);
+    const char* memberC = JS_ToCString(ctx, argv[1]);
+    const std::string tagId = tagIdC ? tagIdC : "";
+    const std::string member = memberC ? memberC : "";
+    JS_FreeCString(ctx, tagIdC);
+    JS_FreeCString(ctx, memberC);
+
+    if (!isNamespacedIdLike(tagId) || !isNamespacedIdLike(member)) {
+        return JS_ThrowTypeError(ctx, "Tags.add: expected namespaced ids");
+    }
+
+    TagDefinition* tag = findPendingTag(self->pendingTags_, tagId);
+    if (!tag) {
+        self->pendingTags_.push_back(TagDefinition{.id = tagId});
+        tag = &self->pendingTags_.back();
+    }
+    if (!isTagMemberRegistered(*tag, member)) {
+        tag->members.push_back(member);
+    }
+    return JS_UNDEFINED;
+}
+
+JSValue ScriptManager::jsTagRemove(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv) {
+    auto* self = static_cast<ScriptManager*>(JS_GetContextOpaque(ctx));
+    if (!self || !self->requirePhase(ctx, ScriptPhase::Startup, "Tags.remove")) {
+        return JS_EXCEPTION;
+    }
+    if (argc < 2 || !JS_IsString(argv[0]) || !JS_IsString(argv[1])) {
+        return JS_ThrowTypeError(ctx, "Tags.remove: expected (tagId, memberId)");
+    }
+
+    const char* tagIdC = JS_ToCString(ctx, argv[0]);
+    const char* memberC = JS_ToCString(ctx, argv[1]);
+    const std::string tagId = tagIdC ? tagIdC : "";
+    const std::string member = memberC ? memberC : "";
+    JS_FreeCString(ctx, tagIdC);
+    JS_FreeCString(ctx, memberC);
+
+    if (!isNamespacedIdLike(tagId) || !isNamespacedIdLike(member)) {
+        return JS_ThrowTypeError(ctx, "Tags.remove: expected namespaced ids");
+    }
+
+    if (TagDefinition* tag = findPendingTag(self->pendingTags_, tagId)) {
+        tag->members.erase(std::remove(tag->members.begin(), tag->members.end(), member), tag->members.end());
+    }
+    return JS_UNDEFINED;
+}
+
+JSValue ScriptManager::jsTagHas(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv) {
+    auto* self = static_cast<ScriptManager*>(JS_GetContextOpaque(ctx));
+    if (!self || argc < 2 || !JS_IsString(argv[0]) || !JS_IsString(argv[1])) {
+        return JS_FALSE;
+    }
+
+    const char* tagIdC = JS_ToCString(ctx, argv[0]);
+    const char* memberC = JS_ToCString(ctx, argv[1]);
+    const std::string tagId = tagIdC ? tagIdC : "";
+    const std::string member = memberC ? memberC : "";
+    JS_FreeCString(ctx, tagIdC);
+    JS_FreeCString(ctx, memberC);
+
+    if (!isNamespacedIdLike(tagId) || !isNamespacedIdLike(member)) {
+        return JS_FALSE;
+    }
+
+    const TagDefinition* tag = self->gameData_ ? findLoadedTag(self->gameData_, tagId) : findPendingTag(self->pendingTags_, tagId);
+    if (!tag) {
+        return JS_FALSE;
+    }
+    return JS_NewBool(ctx, isTagMemberRegistered(*tag, member));
+}
+
 void ScriptManager::loadRuntimeScripts(const PackManager& packManager) {
+    packManager_ = &packManager;
     currentPhase_ = ScriptPhase::Runtime;
+    runtimeTimeSeconds_ = 0.0;
+    for (auto& timer : timers_) {
+        JS_FreeValue(context_, timer.callback);
+    }
+    timers_.clear();
+    for (auto& command : pendingCommands_) {
+        JS_FreeValue(context_, command.handler);
+    }
+    pendingCommands_.clear();
 
     if (std::filesystem::is_directory(engineScriptsPath_)) {
         // Runtime wrappers are intentionally loaded in the runtime phase so they
@@ -1098,6 +2147,7 @@ void ScriptManager::loadRuntimeScripts(const PackManager& packManager) {
 
 void ScriptManager::tick(float deltaTime) {
     currentPhase_ = ScriptPhase::Runtime;
+    runtimeTimeSeconds_ += static_cast<double>(deltaTime);
     JSValue global = JS_GetGlobalObject(context_);
     JSValue tickFn = JS_GetPropertyStr(context_, global, "tick");
     if (JS_IsFunction(context_, tickFn)) {
@@ -1110,6 +2160,83 @@ void ScriptManager::tick(float deltaTime) {
     }
     JS_FreeValue(context_, tickFn);
     JS_FreeValue(context_, global);
+
+    for (auto& timer : timers_) {
+        if (timer.cancelled || runtimeTimeSeconds_ < timer.dueTime) {
+            continue;
+        }
+
+        JSValue result = JS_Call(context_, timer.callback, JS_UNDEFINED, 0, nullptr);
+        if (JS_IsException(result)) {
+            checkException(context_, -1, "timer callback", ScriptPhase::Runtime);
+        }
+        JS_FreeValue(context_, result);
+
+        if (timer.repeating && !timer.cancelled) {
+            timer.dueTime = runtimeTimeSeconds_ + timer.interval;
+        } else {
+            timer.cancelled = true;
+        }
+    }
+
+    auto it = std::remove_if(timers_.begin(), timers_.end(), [&](ScriptTimer& timer) {
+        if (!timer.cancelled) {
+            return false;
+        }
+        JS_FreeValue(context_, timer.callback);
+        return true;
+    });
+    timers_.erase(it, timers_.end());
+}
+
+std::vector<std::string> ScriptManager::executeCommand(std::uint32_t senderId, const std::string& input) {
+    std::vector<std::string> messages;
+    if (input.empty() || input[0] != '/') {
+        return messages;
+    }
+
+    const std::string raw = input.substr(1);
+    const auto parts = splitCommandArgs(raw);
+    if (parts.empty()) {
+        messages.push_back("Usage: /help");
+        return messages;
+    }
+
+    const std::string commandName = parts[0];
+    auto it = std::find_if(pendingCommands_.begin(), pendingCommands_.end(),
+                           [&](const CommandEntry& entry) { return entry.name == commandName; });
+    if (it == pendingCommands_.end()) {
+        messages.push_back("Unknown command: " + commandName);
+        return messages;
+    }
+
+    JSContext* ctx = context_;
+    JSValue handler = JS_DupValue(ctx, it->handler);
+    JSValue contextObj = JS_NewObject(ctx);
+    JS_SetPropertyStr(ctx, contextObj, "playerId", JS_NewInt32(ctx, static_cast<std::int32_t>(senderId)));
+    JS_SetPropertyStr(ctx, contextObj, "raw", JS_NewString(ctx, raw.c_str()));
+    JS_SetPropertyStr(ctx, contextObj, "name", JS_NewString(ctx, commandName.c_str()));
+    JSValue args = JS_NewArray(ctx);
+    for (std::size_t i = 1; i < parts.size(); ++i) {
+        JS_SetPropertyUint32(ctx, args, static_cast<std::uint32_t>(i - 1), JS_NewString(ctx, parts[i].c_str()));
+    }
+    JS_SetPropertyStr(ctx, contextObj, "args", args);
+
+    JSValue result = JS_Call(ctx, handler, JS_UNDEFINED, 1, &contextObj);
+    if (JS_IsException(result)) {
+        checkException(ctx, -1, "command /" + commandName, ScriptPhase::Runtime, input);
+        JS_FreeValue(ctx, contextObj);
+        JS_FreeValue(ctx, handler);
+        return {"Command failed: /" + commandName};
+    }
+
+    collectCommandResult(ctx, result, messages);
+
+    JS_FreeValue(ctx, result);
+    JS_FreeValue(ctx, contextObj);
+    JS_FreeValue(ctx, handler);
+
+    return messages;
 }
 
 }  // namespace voxel

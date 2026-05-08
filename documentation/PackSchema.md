@@ -79,3 +79,4 @@ Source: `tools/codegen/schema/{biome,block,item,recipe,tag}.js`
 | --- | --- | --- | --- | --- | --- |
 | `id` | `TagId` | yes |  | tag_id | Unique namespaced identifier. |
 | `description` | `string` | no | "" |  | Optional human-readable note. |
+| `members` | `NamespacedId[]` | no |  |  | Namespaced ids contained in this tag. |

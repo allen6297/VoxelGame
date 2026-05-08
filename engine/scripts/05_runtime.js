@@ -1,8 +1,81 @@
 /**
  * engine/scripts/05_runtime.js
  *
- * High-level runtime APIs for interacting with the world and players.
+ * High-level runtime APIs for interacting with the world, players, and
+ * finalized game data.
  */
+
+const Data = {
+    /**
+     * Looks up finalized content by id.
+     * @param {string} id
+     */
+    getBlock(id) {
+        return __dataGetBlock(id);
+    },
+
+    getItem(id) {
+        return __dataGetItem(id);
+    },
+
+    getBiome(id) {
+        return __dataGetBiome(id);
+    },
+
+    getTag(id) {
+        return __dataGetTag(id);
+    },
+
+    getRecipe(id) {
+        return __dataGetRecipe(id);
+    },
+
+    getLocalization(locale, key) {
+        return __dataGetLocalization(locale, key);
+    },
+};
+
+const Timers = {
+    setTimeout(callback, delayMs) {
+        return __timerSetTimeout(callback, delayMs);
+    },
+
+    setInterval(callback, intervalMs) {
+        return __timerSetInterval(callback, intervalMs);
+    },
+
+    clear(id) {
+        return __timerClear(id);
+    },
+};
+
+const Commands = {
+    register(name, handler) {
+        return __commandRegister(name, handler);
+    },
+
+    list() {
+        return __commandList();
+    },
+};
+
+const Models = {
+    exists(path) {
+        return __modelExists(path);
+    },
+
+    readText(path) {
+        return __modelReadText(path);
+    },
+
+    readJson(path) {
+        return __modelReadJson(path);
+    },
+
+    list(path) {
+        return __modelList(path);
+    },
+};
 
 const World = {
     /**

@@ -182,6 +182,7 @@ TagDefinition parseTagDefinition(JSContext* ctx, JSValueConst obj) {
     out.id = voxel::js::jsStr  (ctx, obj, "id");
     voxel::js::jsValidate(ctx, "id", out.id, "tag_id");
     out.description = voxel::js::jsStr  (ctx, obj, "description", "");
+    out.members = voxel::js::jsStringArray(ctx, obj, "members");
 
     return out;
 }

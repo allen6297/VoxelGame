@@ -6,6 +6,7 @@
 #include <map>
 #include <limits>
 #include <set>
+#include <unordered_set>
 #include <sstream>
 #include <stdexcept>
 
@@ -25,6 +26,18 @@ bool isRelativeAssetPath(const std::string& value) {
         return false;
     }
     return value.find("://") == std::string::npos;
+}
+
+bool isLocaleCode(const std::string& value) {
+    if (value.empty()) {
+        return false;
+    }
+    for (const char ch : value) {
+        if (!(std::isalnum(static_cast<unsigned char>(ch)) || ch == '_' || ch == '-')) {
+            return false;
+        }
+    }
+    return true;
 }
 
 std::string joinErrors(const std::vector<std::string>& errors) {
@@ -190,6 +203,30 @@ void validateGameDataImpl(const GameData& data, std::vector<std::string>& errors
         }
         if (!isNamespacedId(tag.id)) {
             appendError(errors, "invalid tag id: " + tag.id);
+        }
+        std::unordered_set<std::string> uniqueMembers;
+        for (const auto& member : tag.members) {
+            if (!isNamespacedId(member)) {
+                appendError(errors, "tag " + tag.id + " contains invalid member id: " + member);
+            }
+            uniqueMembers.insert(member);
+        }
+        if (uniqueMembers.size() != tag.members.size()) {
+            appendError(errors, "tag " + tag.id + " contains duplicate members");
+        }
+    }
+
+    for (const auto& [locale, entries] : data.localizations) {
+        if (!isLocaleCode(locale)) {
+            appendError(errors, "invalid localization locale: " + locale);
+        }
+        for (const auto& [key, value] : entries) {
+            if (key.empty()) {
+                appendError(errors, "localization " + locale + " contains an empty key");
+            }
+            if (value.empty()) {
+                appendError(errors, "localization " + locale + " has an empty translation for key: " + key);
+            }
         }
     }
 

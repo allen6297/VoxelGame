@@ -458,14 +458,74 @@ declare const Utils: {
   drop(itemId: ItemId, count?: number): BlockDrop
 }
 
-// ── Globals ───────────────────────────────────────────────────────────────────
-
-interface TagDef {
-  /** Namespaced identifier, e.g. "base:flammable". */
-  id: TagId
-  /** Optional human-readable description. */
-  description?: string
+declare const Logger: {
+  info(...args: unknown[]): void
+  warn(...args: unknown[]): void
+  error(...args: unknown[]): void
+  debug(...args: unknown[]): void
 }
+
+declare const Platform: {
+  isClient(): boolean
+  isServer(): boolean
+  isDevelopment(): boolean
+  getGameVersion(): string
+  isPackLoaded(id: string): boolean
+}
+
+declare const Resources: {
+  exists(path: string): boolean
+  readText(path: string): string | null
+  readJson(path: string): unknown | null
+  list(path: string): string[]
+}
+
+declare const Tags: {
+  add(tag: TagId, member: NamespacedId): void
+  remove(tag: TagId, member: NamespacedId): void
+  has(tag: TagId, member: NamespacedId): boolean
+}
+
+declare const Recipes: {
+  register(def: RecipeDef): void
+  crafting(id: RecipeId, output: ItemId, ingredients: ItemId[] | ItemId, count?: number): void
+  shapeless(id: RecipeId, output: ItemId, ingredients: ItemId[] | ItemId, count?: number): void
+  smelting(id: RecipeId, output: ItemId, ingredient: ItemId | ItemId[], count?: number): void
+}
+
+declare const Localization: {
+  add(locale: string, entries: Record<string, string>): void
+  get(locale: string, key: string): string | null
+}
+
+declare const Data: {
+  getBlock(id: BlockId): BlockDef | null
+  getItem(id: ItemId): ItemDef | null
+  getBiome(id: BiomeId): BiomeDef | null
+  getTag(id: TagId): TagDef | null
+  getRecipe(id: RecipeId): RecipeDef | null
+  getLocalization(locale: string, key: string): string | null
+}
+
+declare const Timers: {
+  setTimeout(callback: () => void, delayMs?: number): number
+  setInterval(callback: () => void, intervalMs: number): number
+  clear(id: number): void
+}
+
+declare const Commands: {
+  register(name: string, handler: (ctx: { playerId: number; raw: string; name: string; args: string[] }) => string | string[] | void): void
+  list(): string[]
+}
+
+declare const Models: {
+  exists(path: string): boolean
+  readText(path: string): string | null
+  readJson(path: string): unknown | null
+  list(path: string): string[]
+}
+
+// ── Globals ───────────────────────────────────────────────────────────────────
 
 interface BlockBuilder {
   displayName(name: string): BlockBuilder
@@ -624,6 +684,16 @@ function genSnippets() {
                 "})",
             ],
             description: 'Register a TERRALITE item.',
+        },
+        'TERRALITE startup log': {
+            prefix: 'tl-log',
+            body: [
+                "Logger.info('Loading ${1:pack_name}...')",
+                "if (Platform.isDevelopment()) {",
+                "  Logger.debug('Development build detected')",
+                "}",
+            ],
+            description: 'Log a simple startup message.',
         },
     }, null, 2) + '\n'
 }

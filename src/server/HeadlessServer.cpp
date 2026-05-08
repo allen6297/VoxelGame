@@ -124,6 +124,7 @@ HeadlessServer::HeadlessServer(GameData gameData)
     scriptManager_ = std::make_unique<ScriptManager>();
     scriptManager_->setWorldSimulation(&simulation_);
     scriptManager_->setGameData(&gameData_);
+    scriptManager_->setHostKind(ScriptHost::Server);
 }
 
 HeadlessServer::~HeadlessServer() {
@@ -143,10 +144,9 @@ bool HeadlessServer::start(const std::uint16_t port, const std::filesystem::path
     network_.setExternalBlockAuthority(true);
 
     // Initialize runtime scripting
-    PackManager packManager;
-    packManager.discover(projectRoot / "packs");
-    scriptManager_->loadGameData(packManager, projectRoot / "engine" / "scripts");
-    scriptManager_->loadRuntimeScripts(packManager);
+    packManager_.discover(projectRoot / "packs");
+    scriptManager_->loadGameData(packManager_, projectRoot / "engine" / "scripts");
+    scriptManager_->loadRuntimeScripts(packManager_);
 
     ensureChunksAround({0, 0, 0});
     std::cout << "Headless world loaded with " << simulation_.world().chunks.size() << " chunk(s).\n";
@@ -243,6 +243,14 @@ void HeadlessServer::tick() {
         auto it = players_.find(chat.playerId);
         if (it != players_.end()) {
             senderName = it->second.name;
+        }
+
+        if (!chat.message.empty() && chat.message[0] == '/' && scriptManager_) {
+            for (const auto& reply : scriptManager_->executeCommand(chat.playerId, chat.message)) {
+                network_.broadcastChatMessage(0, reply);
+                std::cout << "[COMMAND] " << reply << std::endl;
+            }
+            continue;
         }
         std::cout << "[CHAT] " << senderName << " (" << chat.playerId << "): " << chat.message << std::endl;
     }

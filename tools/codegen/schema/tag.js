@@ -14,5 +14,10 @@ module.exports = {
       cpp: 'description', jsPath: 'description', type: 'string', default: '',
       doc: 'Optional human-readable note.',
     },
+    {
+      cpp: 'members', jsPath: 'members', type: 'array',
+      elementType: 'string', dtsType: 'NamespacedId[]',
+      doc: 'Namespaced ids contained in this tag.',
+    },
   ],
 }

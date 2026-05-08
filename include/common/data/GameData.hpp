@@ -85,6 +85,7 @@ struct ItemDefinition {
 struct TagDefinition {
     std::string id;           // namespaced, e.g. "base:flammable"
     std::string description;  // optional human-readable note
+    std::vector<std::string> members;
 };
 
 struct RecipeDefinition
@@ -100,6 +101,7 @@ struct GameData {
     std::unordered_map<std::string, BlockDefinition> blocks;
     std::unordered_map<std::string, ItemDefinition> items;
     std::unordered_map<std::string, TagDefinition> tags;
+    std::unordered_map<std::string, std::unordered_map<std::string, std::string>> localizations;
     std::unordered_map<std::string, BlockStateDefinition> blockStates;
     std::unordered_map<std::string, BiomeDefinition> biomes;
     std::unordered_map<std::string, RecipeDefinition> recipes;

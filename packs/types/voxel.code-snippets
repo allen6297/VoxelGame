@@ -23,5 +23,15 @@
       "})"
     ],
     "description": "Register a TERRALITE item."
+  },
+  "TERRALITE startup log": {
+    "prefix": "tl-log",
+    "body": [
+      "Logger.info('Loading ${1:pack_name}...')",
+      "if (Platform.isDevelopment()) {",
+      "  Logger.debug('Development build detected')",
+      "}"
+    ],
+    "description": "Log a simple startup message."
   }
 }

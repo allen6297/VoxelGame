@@ -40,6 +40,11 @@
  *     event.register({ id: 'my_mod:ore', description: '…' }) // with description
  *   })
  *
+ * ── Recipe helpers ───────────────────────────────────────────────────────────
+ *
+ *   Recipes.crafting('my_mod:plate', 'my_mod:plate', ['my_mod:ingot'])
+ *   Recipes.smelting('my_mod:glass', 'my_mod:glass', 'my_mod:sand')
+ *
  * All callbacks fire immediately (synchronously) when .registry() is called.
  * Builders / objects accumulate in a local list and are flushed to the C++
  * engine primitives (__registerBlock etc.) once the callback returns.
@@ -286,4 +291,27 @@ const StartupEvents = (() => {
     }
   }
 
+})()
+
+const Recipes = (() => {
+  function register(def) {
+    __registerRecipe(def)
+  }
+
+  function normalizeIngredients(ingredients) {
+    return Array.isArray(ingredients) ? ingredients : [ingredients]
+  }
+
+  return {
+    register,
+    crafting(id, output, ingredients, count = 1) {
+      register({ id, type: 'crafting', output, count, ingredients: normalizeIngredients(ingredients) })
+    },
+    shapeless(id, output, ingredients, count = 1) {
+      register({ id, type: 'crafting', output, count, ingredients: normalizeIngredients(ingredients) })
+    },
+    smelting(id, output, ingredient, count = 1) {
+      register({ id, type: 'smelting', output, count, ingredients: normalizeIngredients(ingredient) })
+    },
+  }
 })()

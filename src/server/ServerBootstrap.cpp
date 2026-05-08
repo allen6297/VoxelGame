@@ -34,6 +34,7 @@ ServerContext loadServerContext(const std::filesystem::path& projectRoot) {
     }
 
     ScriptManager scriptManager;
+    scriptManager.setHostKind(ScriptHost::Server);
     return {
         scriptManager.loadGameData(packManager, projectRoot / "engine" / "scripts"),
         projectRoot

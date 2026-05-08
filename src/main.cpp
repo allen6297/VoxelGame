@@ -201,6 +201,7 @@ int main(int argc, char** argv) {
 
         // ── Game data ─────────────────────────────────────────────────────────
         voxel::ScriptManager scriptManager;
+        scriptManager.setHostKind(voxel::ScriptHost::Client);
         voxel::GameData gameData = scriptManager.loadGameData(
             packManager, projectRoot / "engine" / "scripts");
 
@@ -336,7 +337,9 @@ int main(int argc, char** argv) {
             std::string chatInput = ui.consumePendingChatInput();
             if (!chatInput.empty() && activeNetwork) {
                 activeNetwork->publishChatMessage(chatInput);
-                ui.addChatMessage(playerName, chatInput);
+                if (chatInput.empty() || chatInput[0] != '/') {
+                    ui.addChatMessage(playerName, chatInput);
+                }
             }
 
             for (auto& chat : network.takePendingChatMessages()) {

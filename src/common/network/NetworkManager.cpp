@@ -713,8 +713,11 @@ void NetworkManager::handlePacket(ENetPeer* peer, const std::uint8_t* data, cons
         std::memcpy(&packet, data, sizeof(packet));
 
         if (mode_ == Mode::Server) {
-            // Re-broadcast to everyone EXCEPT sender
-            broadcastChatMessage(packet.playerId, packet.message, peer);
+            // Slash-prefixed messages are command requests, not public chat.
+            if (packet.message[0] != '/') {
+                // Re-broadcast to everyone EXCEPT sender
+                broadcastChatMessage(packet.playerId, packet.message, peer);
+            }
             // Also add to local pending (server might want to see it too)
             pendingChatMessages_.push_back({packet.playerId, packet.message});
         } else {

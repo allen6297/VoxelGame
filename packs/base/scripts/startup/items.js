@@ -3,13 +3,13 @@ StartupEvents.registry('item', event => {
     .displayName('Dirt')
     .stackSize(99)
     .placesBlock('base:dirt')
-    .icon('textures/items/dirt.png')
+    .icon('textures/blocks/dirt.ppm')
 
   event.create('base:stone')
     .displayName('Stone')
     .stackSize(99)
     .placesBlock('base:stone')
-    .icon('textures/items/stone.png')
+    .icon('textures/blocks/stone.ppm')
 
   event.create('base:wheat')
     .displayName('Wheat')
@@ -26,5 +26,5 @@ StartupEvents.registry('item', event => {
     .displayName('Door')
     .stackSize(99)
     .placesBlock('base:door')
-    .icon('textures/items/dirt.png')
+    .icon('textures/blocks/dirt.ppm')
 })

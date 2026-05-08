@@ -12,6 +12,7 @@
 #include "common/Player.hpp"
 #include "common/world/WorldPersistence.hpp"
 #include "common/pack/ScriptManager.hpp"
+#include "common/pack/PackManager.hpp"
 
 namespace voxel {
 
@@ -39,6 +40,7 @@ private:
     bool isValidBlockEditTarget(const NetworkBlockChange& request);
 
     GameData gameData_;
+    PackManager packManager_;
     NetworkManager network_;
     WorldSimulation simulation_;
     std::unique_ptr<WorldPersistence> persistence_;
