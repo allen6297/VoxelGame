@@ -15,6 +15,15 @@ constexpr int kChunkZ = ChunkDimensions::z;
 constexpr int kChunkCountY  = WorldLayout::chunksY;
 constexpr int kWorldY       = kChunkY * kChunkCountY;
 constexpr int kViewDistance = WorldLayout::viewDistance;
+constexpr int kRegionChunkX = 16;
+constexpr int kRegionChunkY = 16;
+constexpr int kRegionChunkZ = 16;
+
+enum class ChunkEncoding : std::uint8_t {
+    Uniform = 0,
+    Palette = 1,
+    Raw = 2
+};
 
 struct ChunkCoord {
     int x = 0;
@@ -39,6 +48,7 @@ using ChunkTintColors = std::array<std::array<std::array<float, 3>, kChunkZ>, kC
 struct Chunk {
     ChunkCoord    coord;
     ChunkBlocks   blocks {};
+    bool          dirty = false;
     // Per-column blended biome tint color [lx][lz], filled by TerrainGenerator.
     // Defaults to white so untinted blocks render unmodified.
     ChunkTintColors tintColors;

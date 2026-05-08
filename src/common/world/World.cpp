@@ -64,7 +64,11 @@ void setBlock(World& world, const int x, const int y, const int z, const std::ui
         return;
     }
     const Int3 local = worldToLocalBlock(x, y, z);
-    it->second.blocks[local.x][local.y][local.z] = block;
+    std::uint16_t& current = it->second.blocks[local.x][local.y][local.z];
+    if (current != block) {
+        current = block;
+        it->second.dirty = true;
+    }
 }
 
 bool isSolid(const World& world, const GameData& gameData, const int x, const int y, const int z) {
