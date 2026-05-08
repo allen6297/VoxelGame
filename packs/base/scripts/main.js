@@ -22,5 +22,10 @@ Commands.register('ping', ctx => {
     return `Pong from server (${ctx.args.join(' ') || 'no args'})`;
 });
 
+Commands.register('help', () => {
+    const commands = Commands.list().map(name => `/${name}`);
+    return ['Available commands:', ...commands];
+});
+
 Logger.info('Registered commands:', Commands.list().join(', '))
 Logger.info('Grass model file exists?', Models.exists('models/blocks/grass_block.json'));
