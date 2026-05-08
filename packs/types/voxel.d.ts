@@ -2,7 +2,7 @@
  * Voxel Game — Pack Scripting API
  *
  * GENERATED FILE — do not edit by hand.
- * Source:      tools/codegen/schema/{biome,block,item,recipe}.js
+ * Source:      tools/codegen/schema/{biome,block,item,recipe,tag}.js
  * Regenerate:  node tools/codegen/generate.js   (or: cmake --build . --target generate_bindings)
  */
 
@@ -163,6 +163,8 @@ interface BlockDef {
   id: BlockId
   /** Human-readable display name. */
   name: string
+  /** Ordering hint for runtime ID assignment. Lower values are assigned earlier. */
+  runtimeOrder?: number
   /** Items dropped when this block is broken. */
   drops?: BlockDrop[]
   /** Arbitrary key–value properties accessible from gameplay code. */
@@ -195,6 +197,13 @@ interface RecipeDef {
   count?: number
   /** List of ingredient item ids */
   ingredients?: ItemId[]
+}
+
+interface TagDef {
+  /** Unique namespaced identifier. */
+  id: TagId
+  /** Optional human-readable note. */
+  description?: string
 }
 
 

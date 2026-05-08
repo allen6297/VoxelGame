@@ -34,5 +34,5 @@ jobs:
       - name: Build
         run: cmake --build build --config Release
 
-      - name: Run
-        run: ./build/VoxelGame
+      - name: Headless server smoke test
+        run: ./build/VoxelServer --bootstrap-only

@@ -201,12 +201,22 @@ GameData ScriptManager::loadGameData(const PackManager& packManager,
     }
 
     GameData data;
-    for (auto& b  : pendingBlocks_)      data.blocks[b.id]       = std::move(b);
-    for (auto& i  : pendingItems_)       data.items[i.id]        = std::move(i);
-    for (auto& bi : pendingBiomes_)      data.biomes[bi.id]      = std::move(bi);
-    for (auto& t  : pendingTags_)        data.tags[t.id]         = std::move(t);
-    for (auto& bs : pendingBlockStates_) data.blockStates[bs.id] = std::move(bs);
-    for (auto& r  : pendingRecipes_)     data.recipes[r.id]      = std::move(r);
+    auto insertUnique = [](auto& map, auto&& value, const char* kind) {
+        const std::string id = value.id;
+        auto [it, inserted] = map.emplace(id, std::move(value));
+        if (!inserted) {
+            throw std::runtime_error(std::string("[Pack Validation Error]\nDuplicate ") + kind + " id: " + id);
+        }
+    };
+
+    for (auto& b  : pendingBlocks_)      insertUnique(data.blocks,       std::move(b),  "block");
+    for (auto& i  : pendingItems_)       insertUnique(data.items,        std::move(i),  "item");
+    for (auto& bi : pendingBiomes_)      insertUnique(data.biomes,       std::move(bi), "biome");
+    for (auto& t  : pendingTags_)        data.tags.insert_or_assign(t.id, std::move(t));
+    for (auto& bs : pendingBlockStates_) insertUnique(data.blockStates,   std::move(bs), "block state");
+    for (auto& r  : pendingRecipes_)     insertUnique(data.recipes,      std::move(r),  "recipe");
+
+    validateGameData(data);
 
     finalizeGameData(data);
     return data;
@@ -530,25 +540,39 @@ JSValue ScriptManager::jsRegisterTag(JSContext* ctx, JSValueConst, int argc, JSV
     if (argc < 1)
         return JS_ThrowTypeError(ctx, "__registerTag: expected an id string or object");
 
-    TagDefinition tag;
-
     if (JS_IsString(argv[0])) {
         const char* id = JS_ToCString(ctx, argv[0]);
-        tag.id = id ? id : "";
+        const std::string tagId = id ? id : "";
         JS_FreeCString(ctx, id);
+
+        JSValue obj = JS_NewObject(ctx);
+        JS_SetPropertyStr(ctx, obj, "id", JS_NewString(ctx, tagId.c_str()));
+        TagDefinition tag;
+        try {
+            tag = voxel::generated::parseTagDefinition(ctx, obj);
+        } catch (const std::exception& e) {
+            JS_FreeValue(ctx, obj);
+            return JS_ThrowTypeError(ctx, "__registerTag: %s", e.what());
+        }
+        JS_FreeValue(ctx, obj);
+        if (tag.id.empty() || tag.id.find(':') == std::string::npos)
+            return JS_ThrowTypeError(ctx, "__registerTag: id must be namespaced (e.g. \"base:flammable\")");
+        self->pendingTags_.push_back(std::move(tag));
+        return JS_UNDEFINED;
     } else if (JS_IsObject(argv[0])) {
-        using namespace voxel::js;
-        tag.id          = jsStr(ctx, argv[0], "id");
-        tag.description = jsStr(ctx, argv[0], "description");
+        TagDefinition tag;
+        try {
+            tag = voxel::generated::parseTagDefinition(ctx, argv[0]);
+        } catch (const std::exception& e) {
+            return JS_ThrowTypeError(ctx, "__registerTag: %s", e.what());
+        }
+        if (tag.id.empty() || tag.id.find(':') == std::string::npos)
+            return JS_ThrowTypeError(ctx, "__registerTag: id must be namespaced (e.g. \"base:flammable\")");
+        self->pendingTags_.push_back(std::move(tag));
+        return JS_UNDEFINED;
     } else {
         return JS_ThrowTypeError(ctx, "__registerTag: expected a string id or {id, description} object");
     }
-
-    if (tag.id.empty() || tag.id.find(':') == std::string::npos)
-        return JS_ThrowTypeError(ctx, "__registerTag: id must be namespaced (e.g. \"base:flammable\")");
-
-    self->pendingTags_.push_back(std::move(tag));
-    return JS_UNDEFINED;
 }
 
 JSValue ScriptManager::jsGetTag(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv) {
@@ -561,7 +585,8 @@ JSValue ScriptManager::jsGetTag(JSContext* ctx, JSValueConst, int argc, JSValueC
     JS_FreeCString(ctx, id);
 
     auto* self = static_cast<ScriptManager*>(JS_GetContextOpaque(ctx));
-    for (const auto& t : self->pendingTags_) {
+    for (auto it = self->pendingTags_.rbegin(); it != self->pendingTags_.rend(); ++it) {
+        const auto& t = *it;
         if (t.id == tagId) {
             JSValue obj = JS_NewObject(ctx);
             JS_SetPropertyStr(ctx, obj, "id",          JS_NewString(ctx, t.id.c_str()));

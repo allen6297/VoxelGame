@@ -1,5 +1,5 @@
 // GENERATED FILE — do not edit by hand.
-// Source:      tools/codegen/schema/{biome,block,item,recipe}.js
+// Source:      tools/codegen/schema/{biome,block,item,recipe,tag}.js
 // Regenerate:  node tools/codegen/generate.js
 
 #include "pack/generated/ParseBindings.hpp"
@@ -107,6 +107,7 @@ BlockDefinition parseBlockDefinition(JSContext* ctx, JSValueConst obj) {
     voxel::js::jsValidate(ctx, "id", out.id, "block_id");
     voxel::js::jsRequire(ctx, obj, "name");
     out.name = voxel::js::jsStr  (ctx, obj, "name");
+    out.runtimeOrder = voxel::js::jsInt  (ctx, obj, "runtimeOrder", 1000);
     out.drops = parseBlockDrops(ctx, obj);
     out.properties = parseBlockProperties(ctx, obj);
 
@@ -170,6 +171,17 @@ RecipeDefinition parseRecipeDefinition(JSContext* ctx, JSValueConst obj) {
     voxel::js::jsValidate(ctx, "count", out.count, "positive_int");
     out.ingredients = voxel::js::jsStringArray(ctx, obj, "ingredients");
     voxel::js::jsValidate(ctx, "ingredients", out.ingredients, "item_id");
+
+    return out;
+}
+
+TagDefinition parseTagDefinition(JSContext* ctx, JSValueConst obj) {
+    TagDefinition out{};
+
+    voxel::js::jsRequire(ctx, obj, "id");
+    out.id = voxel::js::jsStr  (ctx, obj, "id");
+    voxel::js::jsValidate(ctx, "id", out.id, "tag_id");
+    out.description = voxel::js::jsStr  (ctx, obj, "description", "");
 
     return out;
 }

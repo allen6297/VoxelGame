@@ -1,7 +1,7 @@
 <!-- GENERATED FILE - do not edit by hand. -->
 # Pack Schema Reference
 
-Source: `tools/codegen/schema/{biome,block,item,recipe}.js`
+Source: `tools/codegen/schema/{biome,block,item,recipe,tag}.js`
 
 ## BiomeDef
 
@@ -40,6 +40,7 @@ Source: `tools/codegen/schema/{biome,block,item,recipe}.js`
 | --- | --- | --- | --- | --- | --- |
 | `id` | `BlockId` | yes |  | block_id | Unique namespaced identifier. @example "base:grass" |
 | `name` | `string` | yes |  |  | Human-readable display name. |
+| `runtimeOrder` | `int` | no | 1000 |  | Ordering hint for runtime ID assignment. Lower values are assigned earlier. |
 | `voxel.solid` | `bool` | no | false |  | Whether this block has a solid collision box. |
 | `voxel.translucent` | `bool` | no | false |  | Whether light passes through this block. |
 | `voxel.material` | `BlockMaterial` | no | "terrain" |  | Physics/sound material group. @example "terrain" "rock" "liquid" "plant" |
@@ -71,3 +72,10 @@ Source: `tools/codegen/schema/{biome,block,item,recipe}.js`
 | `output` | `ItemId` | yes |  | item_id | Output item id |
 | `count` | `int` | no | 1 | positive_int | Output count |
 | `ingredients` | `ItemId[]` | no |  | item_id | List of ingredient item ids |
+
+## TagDef
+
+| Field | Type | Required | Default | Validator | Description |
+| --- | --- | --- | --- | --- | --- |
+| `id` | `TagId` | yes |  | tag_id | Unique namespaced identifier. |
+| `description` | `string` | no | "" |  | Optional human-readable note. |

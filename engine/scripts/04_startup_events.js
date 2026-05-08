@@ -165,6 +165,7 @@ const StartupEvents = (() => {
   BlockBuilder.prototype.translucent = function (t) { this._def.voxel.translucent = Boolean(t); return this }
   BlockBuilder.prototype.tintKey     = function (t) { this._def.render.tintKey    = Boolean(t); return this }
   BlockBuilder.prototype.material    = function (m) { this._def.voxel.material    = String(m);  return this }
+  BlockBuilder.prototype.runtimeOrder = function (n) { this._def.runtimeOrder      = +n;         return this }
 
   /**
    * Drop entries.

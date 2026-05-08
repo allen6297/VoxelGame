@@ -1,19 +1,273 @@
 #include "data/GameData.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <iostream>
 #include <map>
+#include <limits>
+#include <set>
 #include <sstream>
+#include <stdexcept>
 
 namespace voxel {
 namespace {
 
-constexpr std::array<const char*, 4> kPreferredBlockOrder = {
-    "base:grass",
-    "base:dirt",
-    "base:water",
-    "base:stone"
-};
+bool isNamespacedId(const std::string& value) {
+    const auto colon = value.find(':');
+    return !value.empty() && colon != std::string::npos && colon > 0 && colon + 1 < value.size();
+}
+
+bool isRelativeAssetPath(const std::string& value) {
+    if (value.empty()) {
+        return true;
+    }
+    if (value.starts_with('/') || value.starts_with("../")) {
+        return false;
+    }
+    return value.find("://") == std::string::npos;
+}
+
+std::string joinErrors(const std::vector<std::string>& errors) {
+    std::ostringstream stream;
+    for (const auto& error : errors) {
+        stream << error << '\n';
+    }
+    return stream.str();
+}
+
+void appendError(std::vector<std::string>& errors, const std::string& message) {
+    errors.push_back(message);
+}
+
+template <typename T>
+void validateRange(std::vector<std::string>& errors,
+                   const std::string& prefix,
+                   const std::string& field,
+                   T value,
+                   T minValue,
+                   T maxValue) {
+    if (value < minValue || value > maxValue) {
+        appendError(errors, prefix + field + " must be in range [" + std::to_string(minValue) +
+                               ", " + std::to_string(maxValue) + "]");
+    }
+}
+
+std::string propertyToString(const BlockProperty& property) {
+    if (std::holds_alternative<bool>(property)) {
+        return std::get<bool>(property) ? "true" : "false";
+    }
+    if (std::holds_alternative<int>(property)) {
+        return std::to_string(std::get<int>(property));
+    }
+    if (std::holds_alternative<float>(property)) {
+        std::ostringstream stream;
+        stream << std::get<float>(property);
+        return stream.str();
+    }
+    return std::get<std::string>(property);
+}
+
+void validateBlockStateDefinition(const BlockStateDefinition& stateDef,
+                                  std::vector<std::string>& errors) {
+    if (!isNamespacedId(stateDef.id)) {
+        appendError(errors, "block state id must be namespaced: " + stateDef.id);
+    }
+
+    std::set<std::string> seenProps;
+    for (const auto& [propName, propDef] : stateDef.props) {
+        if (propName.empty()) {
+            appendError(errors, "block state " + stateDef.id + " has an empty property name");
+        }
+        if (!seenProps.insert(propName).second) {
+            appendError(errors, "block state " + stateDef.id + " has duplicate property: " + propName);
+        }
+        if (propDef.values.empty()) {
+            appendError(errors, "block state " + stateDef.id + "." + propName + " has no values");
+        }
+
+        std::set<std::string> seenValues;
+        bool defaultFound = false;
+        const std::string defaultString = propertyToString(propDef.defaultValue);
+        for (const auto& value : propDef.values) {
+            const std::string text = propertyToString(value);
+            if (!seenValues.insert(text).second) {
+                appendError(errors, "block state " + stateDef.id + "." + propName +
+                                      " contains duplicate value: " + text);
+            }
+            if (text == defaultString) {
+                defaultFound = true;
+            }
+        }
+        if (!defaultFound) {
+            appendError(errors, "block state " + stateDef.id + "." + propName +
+                                  " default value is not present in the allowed values");
+        }
+    }
+
+    for (const auto& [variantKey, variant] : stateDef.variants) {
+        if (variantKey.empty()) {
+            appendError(errors, "block state " + stateDef.id + " has an empty variant key");
+        }
+        if (variant.modelPath.has_value() && !isRelativeAssetPath(*variant.modelPath)) {
+            appendError(errors, "block state " + stateDef.id + " variant " + variantKey +
+                                  " uses an invalid model path: " + *variant.modelPath);
+        }
+    }
+}
+
+void validateGameDataImpl(const GameData& data, std::vector<std::string>& errors) {
+    for (const auto& [id, block] : data.blocks) {
+        if (id != block.id) {
+            appendError(errors, "block map key does not match block.id for " + id);
+        }
+        if (!isNamespacedId(block.id)) {
+            appendError(errors, "invalid block id: " + block.id);
+        }
+        if (block.runtimeOrder < 0) {
+            appendError(errors, "block " + block.id + " runtimeOrder must be non-negative");
+        }
+        validateRange(errors, "block " + block.id + ": ", "opacity", block.opacity, 0.0f, 1.0f);
+        for (std::size_t i = 0; i < block.color.size(); ++i) {
+            validateRange(errors, "block " + block.id + ": ", "color[" + std::to_string(i) + "]", block.color[i], 0.0f, 1.0f);
+        }
+        if (!isRelativeAssetPath(block.modelPath)) {
+            appendError(errors, "block " + block.id + " has invalid model path: " + block.modelPath);
+        }
+        if (block.textures.albedo.has_value() && !isRelativeAssetPath(*block.textures.albedo)) {
+            appendError(errors, "block " + block.id + " has invalid albedo texture path: " + *block.textures.albedo);
+        }
+        if (block.textures.normal.has_value() && !isRelativeAssetPath(*block.textures.normal)) {
+            appendError(errors, "block " + block.id + " has invalid normal texture path: " + *block.textures.normal);
+        }
+        if (block.textures.roughness.has_value() && !isRelativeAssetPath(*block.textures.roughness)) {
+            appendError(errors, "block " + block.id + " has invalid roughness texture path: " + *block.textures.roughness);
+        }
+        if (block.textures.emissive.has_value() && !isRelativeAssetPath(*block.textures.emissive)) {
+            appendError(errors, "block " + block.id + " has invalid emissive texture path: " + *block.textures.emissive);
+        }
+        for (const auto& drop : block.drops) {
+            if (!isNamespacedId(drop.item)) {
+                appendError(errors, "block " + block.id + " has invalid drop item id: " + drop.item);
+            } else if (!data.items.contains(drop.item)) {
+                appendError(errors, "block " + block.id + " drop references missing item: " + drop.item);
+            }
+            if (drop.count <= 0) {
+                appendError(errors, "block " + block.id + " drop count must be positive for item " + drop.item);
+            }
+        }
+        for (const auto& [key, value] : block.properties) {
+            (void)key;
+            if (std::holds_alternative<std::string>(value)) {
+                const auto& text = std::get<std::string>(value);
+                if (!text.empty() && !isNamespacedId(text) && key.find("id") != std::string::npos) {
+                    appendError(errors, "block " + block.id + " property " + key + " should be namespaced: " + text);
+                }
+            }
+        }
+    }
+
+    for (const auto& [id, item] : data.items) {
+        if (id != item.id) {
+            appendError(errors, "item map key does not match item.id for " + id);
+        }
+        if (!isNamespacedId(item.id)) {
+            appendError(errors, "invalid item id: " + item.id);
+        }
+        if (item.stackSize <= 0) {
+            appendError(errors, "item " + item.id + " stackSize must be positive");
+        }
+        if (!isRelativeAssetPath(item.icon)) {
+            appendError(errors, "item " + item.id + " has invalid icon path: " + item.icon);
+        }
+        if (item.placeableBlock.has_value() && !data.blocks.contains(*item.placeableBlock)) {
+            appendError(errors, "item " + item.id + " references missing placeable block: " + *item.placeableBlock);
+        }
+    }
+
+    for (const auto& [id, tag] : data.tags) {
+        if (id != tag.id) {
+            appendError(errors, "tag map key does not match tag.id for " + id);
+        }
+        if (!isNamespacedId(tag.id)) {
+            appendError(errors, "invalid tag id: " + tag.id);
+        }
+    }
+
+    for (const auto& [id, biome] : data.biomes) {
+        if (id != biome.id) {
+            appendError(errors, "biome map key does not match biome.id for " + id);
+        }
+        if (!isNamespacedId(biome.id)) {
+            appendError(errors, "invalid biome id: " + biome.id);
+        }
+        validateRange(errors, "biome " + biome.id + ": ", "priority", biome.priority, 0.0f, std::numeric_limits<float>::max());
+        validateRange(errors, "biome " + biome.id + ": ", "rarity", biome.rarity, 0.0f, std::numeric_limits<float>::max());
+        const auto validateRangeField = [&](const char* fieldName, const BiomeClimateRange& range) {
+            validateRange(errors, "biome " + biome.id + ": " + std::string(fieldName) + ".",
+                          "min", range.min, 0.0f, 1.0f);
+            validateRange(errors, "biome " + biome.id + ": " + std::string(fieldName) + ".",
+                          "max", range.max, 0.0f, 1.0f);
+            if (range.min > range.max) {
+                appendError(errors, "biome " + biome.id + ": " + fieldName + " min must be <= max");
+            }
+        };
+        validateRangeField("temperature", biome.climate.temperature);
+        validateRangeField("humidity", biome.climate.humidity);
+        validateRangeField("rainfall", biome.climate.rainfall);
+        validateRangeField("elevation", biome.climate.elevation);
+        validateRangeField("drainage", biome.climate.drainage);
+        validateRangeField("waterTable", biome.climate.waterTable);
+        for (const auto& [name, color] : biome.colors) {
+            (void)name;
+            for (std::size_t i = 0; i < color.size(); ++i) {
+                validateRange(errors, "biome " + biome.id + ": color " + name + " ",
+                               "[" + std::to_string(i) + "]", color[i], 0.0f, 1.0f);
+            }
+        }
+        for (const auto& reference : {biome.surface.top, biome.surface.middle, biome.surface.base}) {
+            if (!reference.empty() && !data.blocks.contains(reference)) {
+                appendError(errors, "biome " + biome.id + " references missing block: " + reference);
+            }
+        }
+        for (const auto field : {biome.fertility.nitrogen, biome.fertility.phosphorus, biome.fertility.potassium,
+                                 biome.fertility.magnesium, biome.fertility.calcium, biome.fertility.sulfur}) {
+            validateRange(errors, "biome " + biome.id + ": ", "fertility", field, 0.0f, 1.0f);
+        }
+    }
+
+    for (const auto& [id, recipe] : data.recipes) {
+        if (id != recipe.id) {
+            appendError(errors, "recipe map key does not match recipe.id for " + id);
+        }
+        if (!isNamespacedId(recipe.id)) {
+            appendError(errors, "invalid recipe id: " + recipe.id);
+        }
+        if (recipe.count <= 0) {
+            appendError(errors, "recipe " + recipe.id + " count must be positive");
+        }
+        if (!data.items.contains(recipe.output)) {
+            appendError(errors, "recipe " + recipe.id + " output references missing item: " + recipe.output);
+        }
+        if (recipe.ingredients.empty()) {
+            appendError(errors, "recipe " + recipe.id + " has no ingredients");
+        }
+        for (const auto& ingredient : recipe.ingredients) {
+            if (!data.items.contains(ingredient)) {
+                appendError(errors, "recipe " + recipe.id + " ingredient references missing item: " + ingredient);
+            }
+        }
+    }
+
+    for (const auto& [id, stateDef] : data.blockStates) {
+        if (id != stateDef.id) {
+            appendError(errors, "block state map key does not match blockState.id for " + id);
+        }
+        if (!data.blocks.contains(stateDef.id)) {
+            appendError(errors, "block state references missing block definition: " + stateDef.id);
+        }
+        validateBlockStateDefinition(stateDef, errors);
+    }
+}
 
 std::string blockPropertyToString(const BlockProperty& property) {
     if (std::holds_alternative<bool>(property)) {
@@ -72,8 +326,17 @@ std::vector<std::unordered_map<std::string, BlockProperty>> enumerateStates(
 
 }  // namespace
 
+void validateGameData(const GameData& data) {
+    std::vector<std::string> errors;
+    validateGameDataImpl(data, errors);
+    if (!errors.empty()) {
+        throw std::runtime_error("[Pack Validation Error]\n" + joinErrors(errors));
+    }
+}
+
 void finalizeGameData(GameData& data) {
-    // Assign state ID ranges — preferred blocks get lower IDs
+    // Assign state ID ranges in runtimeOrder order so packs can steer which
+    // blocks receive the lowest state IDs without hardcoding specific ids.
     std::map<std::string, std::uint16_t> defaultStateIds;
     std::uint16_t nextId = 1;
 
@@ -93,11 +356,19 @@ void finalizeGameData(GameData& data) {
         nextId += static_cast<std::uint16_t>(count);
     };
 
-    for (const char* preferredId : kPreferredBlockOrder) {
-        if (data.blocks.contains(preferredId)) assignBlock(preferredId);
+    std::vector<const BlockDefinition*> orderedBlocks;
+    orderedBlocks.reserve(data.blocks.size());
+    for (const auto& [_, block] : data.blocks) {
+        orderedBlocks.push_back(&block);
     }
-    for (const auto& [blockId, _] : data.blocks) {
-        assignBlock(blockId);
+    std::sort(orderedBlocks.begin(), orderedBlocks.end(), [](const BlockDefinition* a, const BlockDefinition* b) {
+        if (a->runtimeOrder != b->runtimeOrder) {
+            return a->runtimeOrder < b->runtimeOrder;
+        }
+        return a->id < b->id;
+    });
+    for (const auto* block : orderedBlocks) {
+        assignBlock(block->id);
     }
 
     // Populate block definitions and state registry

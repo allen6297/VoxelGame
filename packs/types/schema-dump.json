@@ -335,6 +335,13 @@
         "doc": "Human-readable display name."
       },
       {
+        "cpp": "runtimeOrder",
+        "jsPath": "runtimeOrder",
+        "type": "int",
+        "default": 1000,
+        "doc": "Ordering hint for runtime ID assignment. Lower values are assigned earlier."
+      },
+      {
         "cpp": "solid",
         "jsPath": "voxel.solid",
         "type": "bool",
@@ -553,6 +560,29 @@
         "validator": "item_id",
         "dtsType": "ItemId[]",
         "doc": "List of ingredient item ids"
+      }
+    ]
+  },
+  {
+    "cppStruct": "TagDefinition",
+    "dtsInterface": "TagDef",
+    "dtsGroups": {},
+    "fields": [
+      {
+        "cpp": "id",
+        "jsPath": "id",
+        "type": "string",
+        "required": true,
+        "validator": "tag_id",
+        "dtsType": "TagId",
+        "doc": "Unique namespaced identifier."
+      },
+      {
+        "cpp": "description",
+        "jsPath": "description",
+        "type": "string",
+        "default": "",
+        "doc": "Optional human-readable note."
       }
     ]
   }

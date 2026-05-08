@@ -54,6 +54,7 @@ struct BlockDefinition {
     std::uint16_t runtimeId = 0;  // default state ID for this block type
     std::string id;
     std::string name;
+    int runtimeOrder = 1000;
     bool solid = false;
     bool translucent = false;
     std::string material;
@@ -125,6 +126,7 @@ struct GameData {
 
 // Assigns state IDs, populates derived look-up tables, and fills the flat
 // solid/liquid arrays.  Call after blocks/items/biomes/blockStates are populated.
+void validateGameData(const GameData& data);
 void finalizeGameData(GameData& data);
 std::uint16_t runtimeIdForBlock(const GameData& gameData, const std::string& blockId);
 const BlockDefinition* findBlockDefinitionForBlockType(const GameData& gameData, std::uint16_t stateId);

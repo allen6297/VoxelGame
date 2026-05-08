@@ -46,8 +46,8 @@ std::filesystem::path findClientProjectRoot() {
 
 std::uint16_t parsePort(const char* value) {
     const int port = std::stoi(value);
-    if (port <= 0 || port > 65535) {
-        throw std::runtime_error("Port must be between 1 and 65535.");
+    if (port < 0 || port > 65535) {
+        throw std::runtime_error("Port must be between 0 and 65535.");
     }
     return static_cast<std::uint16_t>(port);
 }

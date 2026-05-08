@@ -218,6 +218,11 @@
           "type": "string",
           "description": "Human-readable display name."
         },
+        "runtimeOrder": {
+          "type": "integer",
+          "description": "Ordering hint for runtime ID assignment. Lower values are assigned earlier.",
+          "default": 1000
+        },
         "voxel": {
           "type": "object",
           "properties": {
@@ -384,6 +389,23 @@
         "id",
         "type",
         "output"
+      ]
+    },
+    "TagDef": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique namespaced identifier."
+        },
+        "description": {
+          "type": "string",
+          "description": "Optional human-readable note.",
+          "default": ""
+        }
+      },
+      "required": [
+        "id"
       ]
     }
   }

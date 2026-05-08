@@ -22,20 +22,21 @@ void handleSignal(int) {
 
 std::uint16_t parsePort(const char* value) {
     const int port = std::stoi(value);
-    if (port <= 0 || port > 65535) {
-        throw std::runtime_error("Port must be between 1 and 65535.");
+    if (port < 0 || port > 65535) {
+        throw std::runtime_error("Port must be between 0 and 65535.");
     }
     return static_cast<std::uint16_t>(port);
 }
 
 void printUsage(const char* exeName) {
-    std::cout << "Usage: " << exeName << " [--port 27015]\n";
+    std::cout << "Usage: " << exeName << " [--port 27015] [--bootstrap-only]\n";
 }
 
 }  // namespace
 
 int main(int argc, char** argv) {
     std::uint16_t port = kDefaultPort;
+    bool bootstrapOnly = false;
 
     try {
         for (int i = 1; i < argc; ++i) {
@@ -43,6 +44,10 @@ int main(int argc, char** argv) {
             if (arg == "--help" || arg == "-h") {
                 printUsage(argv[0]);
                 return 0;
+            }
+            if (arg == "--bootstrap-only") {
+                bootstrapOnly = true;
+                continue;
             }
             if (arg == "--port") {
                 if (i + 1 >= argc) {
@@ -54,11 +59,16 @@ int main(int argc, char** argv) {
             throw std::runtime_error("Unknown argument: " + arg);
         }
 
+        const std::filesystem::path projectRoot = voxel::findProjectRoot();
+        voxel::ServerContext context = voxel::loadServerContext(projectRoot);
+        if (bootstrapOnly) {
+            std::cout << "VoxelServer bootstrap completed.\n";
+            return 0;
+        }
+
         std::signal(SIGINT, handleSignal);
         std::signal(SIGTERM, handleSignal);
 
-        const std::filesystem::path projectRoot = voxel::findProjectRoot();
-        voxel::ServerContext context = voxel::loadServerContext(projectRoot);
         voxel::HeadlessServer server(std::move(context.gameData));
         if (!server.start(port, projectRoot)) {
             return 1;

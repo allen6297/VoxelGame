@@ -12,5 +12,6 @@ BiomeDefinition parseBiomeDefinition(JSContext* ctx, JSValueConst obj);
 BlockDefinition parseBlockDefinition(JSContext* ctx, JSValueConst obj);
 ItemDefinition parseItemDefinition(JSContext* ctx, JSValueConst obj);
 RecipeDefinition parseRecipeDefinition(JSContext* ctx, JSValueConst obj);
+TagDefinition parseTagDefinition(JSContext* ctx, JSValueConst obj);
 
 } // namespace voxel::generated

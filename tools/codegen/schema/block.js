@@ -28,6 +28,10 @@ module.exports = {
       cpp: 'name', jsPath: 'name', type: 'string', required: true,
       doc: 'Human-readable display name.',
     },
+    {
+      cpp: 'runtimeOrder', jsPath: 'runtimeOrder', type: 'int', default: 1000,
+      doc: 'Ordering hint for runtime ID assignment. Lower values are assigned earlier.',
+    },
 
     // ── voxel group ──────────────────────────────────────────────────────────
     {
