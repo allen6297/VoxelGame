@@ -1,5 +1,8 @@
 #include "data/GameData.hpp"
+#include "pack/PackManager.hpp"
+#include "pack/ScriptManager.hpp"
 
+#include <filesystem>
 #include <iostream>
 #include <stdexcept>
 #include <string>
@@ -118,6 +121,29 @@ int main() {
     invalid.items["base:stone"] = makeItem("base:stone", "Stone");
     invalid.blocks["base:stone"].drops.push_back({"base:missing_item", 1});
     ok &= expectThrowsValidation(invalid, "missing item");
+
+    try {
+        const std::filesystem::path projectRoot = std::filesystem::current_path().parent_path();
+        voxel::PackManager packManager;
+        packManager.discover(projectRoot / "packs");
+
+        voxel::ScriptManager scripts;
+        scripts.setHostKind(voxel::ScriptHost::Server);
+        GameData loadedData = scripts.loadGameData(packManager, projectRoot / "engine" / "scripts");
+        scripts.setGameData(&loadedData);
+        scripts.loadRuntimeScripts(packManager);
+
+        const auto help = scripts.executeCommand(1, "/help");
+        const bool hasHelpHeader = std::find(help.begin(), help.end(), "Available commands:") != help.end();
+        const bool hasHelpCommand = std::find(help.begin(), help.end(), "/help") != help.end();
+        const bool hasPingCommand = std::find(help.begin(), help.end(), "/ping") != help.end();
+        ok &= expect(hasHelpHeader && hasHelpCommand && hasPingCommand,
+                     "runtime scripts should register /help and /ping commands");
+    } catch (const std::exception& error) {
+        std::cerr << "[FAIL] runtime command registration should not throw:\n"
+                  << error.what() << '\n';
+        ok = false;
+    }
 
     if (!ok) {
         return 1;

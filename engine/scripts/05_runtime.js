@@ -5,7 +5,7 @@
  * finalized game data.
  */
 
-const Data = {
+globalThis.Data = {
     /**
      * Looks up finalized content by id.
      * @param {string} id
@@ -35,7 +35,7 @@ const Data = {
     },
 };
 
-const Timers = {
+globalThis.Timers = {
     setTimeout(callback, delayMs) {
         return __timerSetTimeout(callback, delayMs);
     },
@@ -49,7 +49,7 @@ const Timers = {
     },
 };
 
-const Commands = {
+globalThis.Commands = {
     register(name, handler) {
         return __commandRegister(name, handler);
     },
@@ -59,25 +59,7 @@ const Commands = {
     },
 };
 
-const Models = {
-    exists(path) {
-        return __modelExists(path);
-    },
-
-    readText(path) {
-        return __modelReadText(path);
-    },
-
-    readJson(path) {
-        return __modelReadJson(path);
-    },
-
-    list(path) {
-        return __modelList(path);
-    },
-};
-
-const World = {
+globalThis.World = {
     /**
      * Gets the block state ID or namespaced ID at the given coordinates.
      * @param {number} x
@@ -101,7 +83,7 @@ const World = {
     }
 };
 
-const Player = {
+globalThis.Player = {
     /**
      * Gets the current player's position.
      * @returns {{x: number, y: number, z: number}}

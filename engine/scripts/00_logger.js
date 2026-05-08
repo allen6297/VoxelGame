@@ -21,3 +21,25 @@ const Logger = {
     __logInfo(...args)
   },
 }
+
+globalThis.console = {
+  log(...args) {
+    Logger.info(...args)
+  },
+
+  info(...args) {
+    Logger.info(...args)
+  },
+
+  warn(...args) {
+    Logger.warn(...args)
+  },
+
+  error(...args) {
+    Logger.error(...args)
+  },
+
+  debug(...args) {
+    Logger.debug(...args)
+  },
+}

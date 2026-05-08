@@ -34,6 +34,8 @@ public:
     DebugOverlayData getDebugData() const;
     const Inventory& getInventory() const { return player_.inventory; }
     const GameData& gameData() const { return gameData_; }
+    Player& player() { return player_; }
+    const Player& player() const { return player_; }
     ecs::EntitySystem& entitySystem() { return entitySystem_; }
     const ecs::EntitySystem& entitySystem() const { return entitySystem_; }
     WorldSimulation& simulation() { return simulation_; }

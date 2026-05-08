@@ -241,6 +241,16 @@ int main(int argc, char** argv) {
         voxel::Game   game(std::move(gameData), assetsRoot, playerName, activeNetwork);
         voxel::GameUI ui(window, fbWidth, fbHeight, assetsRoot);
 
+        const bool runLocalRuntimeScripts =
+            activeNetwork == nullptr || activeNetwork->mode() == voxel::NetworkManager::Mode::Server;
+        if (runLocalRuntimeScripts) {
+            scriptManager.setHostKind(voxel::ScriptHost::Server);
+            scriptManager.setWorldSimulation(&game.simulation());
+            scriptManager.setCurrentPlayer(&game.player());
+            scriptManager.setGameData(&game.gameData());
+            scriptManager.loadRuntimeScripts(packManager);
+        }
+
         // Forward GLFW events to RmlUI — use window user pointer so lambdas
         // need no captures (required for GLFW's C-style callback signature).
         glfwSetWindowUserPointer(window, &ui);
@@ -274,6 +284,7 @@ int main(int argc, char** argv) {
         auto  lastTime   = static_cast<float>(glfwGetTime());
         bool  escWasDown = false;
         bool  enterWasDown = false;
+        bool  tWasDown = false;
         bool  gWasDown = false;
 
         ui.setGameData(&game.gameData());
@@ -289,44 +300,54 @@ int main(int argc, char** argv) {
             const float deltaTime   = std::min(rawDelta, 0.05f);
             lastTime = currentTime;
 
-            // ESC edge-triggers cursor capture toggle
+            auto syncCursorForUI = [&]() {
+                if (ui.isChatOpen() || ui.isCraftingOpen()) {
+                    glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
+                } else {
+                    glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+                }
+            };
+
+            // ESC closes chat if open; otherwise it edge-triggers cursor capture toggle.
             const bool escDown = glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS;
             if (escDown && !escWasDown) {
-                const bool captured =
-                    glfwGetInputMode(window, GLFW_CURSOR) == GLFW_CURSOR_DISABLED;
-                glfwSetInputMode(window, GLFW_CURSOR,
-                    captured ? GLFW_CURSOR_NORMAL : GLFW_CURSOR_DISABLED);
-                if (!captured && glfwRawMouseMotionSupported())
-                    glfwSetInputMode(window, GLFW_RAW_MOUSE_MOTION, GLFW_TRUE);
+                if (ui.isChatOpen()) {
+                    ui.setChatOpen(false);
+                    syncCursorForUI();
+                } else {
+                    const bool captured =
+                        glfwGetInputMode(window, GLFW_CURSOR) == GLFW_CURSOR_DISABLED;
+                    glfwSetInputMode(window, GLFW_CURSOR,
+                        captured ? GLFW_CURSOR_NORMAL : GLFW_CURSOR_DISABLED);
+                    if (!captured && glfwRawMouseMotionSupported())
+                        glfwSetInputMode(window, GLFW_RAW_MOUSE_MOTION, GLFW_TRUE);
+                }
             }
             escWasDown = escDown;
 
-            // ENTER or T opens/closes chat
+            // ENTER opens chat; T opens chat.
             const bool enterDown = glfwGetKey(window, GLFW_KEY_ENTER) == GLFW_PRESS;
             const bool tDown = glfwGetKey(window, GLFW_KEY_T) == GLFW_PRESS;
-            if ((enterDown && !enterWasDown) || (tDown && !ui.isChatOpen())) {
-                if (ui.isChatOpen()) {
-                    // Chat is already open, Enter might be handled by ImGui InputText(EnterReturnsTrue)
-                } else {
-                    ui.setChatOpen(true);
-                    glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
-                }
+            if (!ui.isChatOpen() && ((enterDown && !enterWasDown) || (tDown && !tWasDown))) {
+                ui.setChatOpen(true);
+                syncCursorForUI();
             }
             enterWasDown = enterDown;
+            tWasDown = tDown;
 
             // G opens/closes crafting
             const bool gDown = glfwGetKey(window, GLFW_KEY_G) == GLFW_PRESS;
             if (gDown && !gWasDown) {
                 ui.setCraftingOpen(!ui.isCraftingOpen());
-                if (ui.isCraftingOpen()) {
-                    glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
-                } else if (!ui.isChatOpen()) {
-                    glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
-                }
+                syncCursorForUI();
             }
             gWasDown = gDown;
 
             game.update(window, deltaTime);
+
+            if (runLocalRuntimeScripts) {
+                scriptManager.tick(deltaTime);
+            }
 
             // Sync world time from network
             if (auto time = network.takePendingWorldTime()) {
@@ -335,14 +356,33 @@ int main(int argc, char** argv) {
 
             // Sync chat between UI and Network
             std::string chatInput = ui.consumePendingChatInput();
-            if (!chatInput.empty() && activeNetwork) {
-                activeNetwork->publishChatMessage(chatInput);
-                if (chatInput.empty() || chatInput[0] != '/') {
+            if (!chatInput.empty()) {
+                if (activeNetwork) {
+                    activeNetwork->publishChatMessage(chatInput);
+                    if (activeNetwork->mode() == voxel::NetworkManager::Mode::Client &&
+                        (chatInput.empty() || chatInput[0] != '/')) {
+                        ui.addChatMessage(playerName, chatInput);
+                    }
+                } else if (chatInput[0] != '/') {
                     ui.addChatMessage(playerName, chatInput);
+                } else if (runLocalRuntimeScripts) {
+                    for (const auto& reply : scriptManager.executeCommand(network.localPlayerId(), chatInput)) {
+                        ui.addChatMessage("Server", reply);
+                    }
                 }
             }
 
             for (auto& chat : network.takePendingChatMessages()) {
+                if (!chat.message.empty() && chat.message[0] == '/' && runLocalRuntimeScripts) {
+                    for (const auto& reply : scriptManager.executeCommand(chat.playerId, chat.message)) {
+                        if (activeNetwork && activeNetwork->mode() == voxel::NetworkManager::Mode::Server) {
+                            activeNetwork->broadcastChatMessage(0, reply);
+                        }
+                        ui.addChatMessage("Server", reply);
+                    }
+                    continue;
+                }
+
                 std::string sender = "Server";
                 if (chat.playerId == network.localPlayerId()) {
                     sender = playerName;

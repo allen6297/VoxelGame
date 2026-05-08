@@ -444,6 +444,11 @@ void NetworkManager::publishEntityDestroy(std::uint32_t entityId) {
 void NetworkManager::publishChatMessage(const std::string& message) {
     if (mode_ == Mode::Client && serverPeer_) {
         sendChatMessage(serverPeer_, localPlayerId_, message);
+    } else if (mode_ == Mode::Server) {
+        if (!message.empty() && message[0] != '/') {
+            broadcastChatMessage(localPlayerId_, message);
+        }
+        pendingChatMessages_.push_back({localPlayerId_, message});
     }
 }
 

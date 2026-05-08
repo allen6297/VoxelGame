@@ -71,8 +71,11 @@ private:
     // Chat
     std::vector<ChatMessage> chatMessages_;
     bool chatOpen_ = false;
+    bool chatSubmitArmed_ = true;
+    bool chatEnterWasDown_ = false;
     char chatInputBuffer_[256] = {0};
     bool chatInputSubmitted_ = false;
+    std::string pendingChatInput_;
 
     // Crafting
     bool craftingOpen_ = false;

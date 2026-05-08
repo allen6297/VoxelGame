@@ -132,10 +132,18 @@ void GameUI::update() {
         if (chatOpen_) {
             ImGui::Separator();
             ImGui::SetKeyboardFocusHere();
-            if (ImGui::InputText("##chat_input", chatInputBuffer_, sizeof(chatInputBuffer_), ImGuiInputTextFlags_EnterReturnsTrue)) {
-                chatInputSubmitted_ = true;
-                chatOpen_ = false;
+            const bool enterDown = glfwGetKey(window_, GLFW_KEY_ENTER) == GLFW_PRESS;
+            if (!chatSubmitArmed_ && !enterDown) {
+                chatSubmitArmed_ = true;
             }
+            ImGui::InputText("##chat_input", chatInputBuffer_, sizeof(chatInputBuffer_));
+            if (chatSubmitArmed_ && enterDown && !chatEnterWasDown_) {
+                pendingChatInput_ = chatInputBuffer_;
+                chatInputSubmitted_ = true;
+                chatSubmitArmed_ = false;
+                std::memset(chatInputBuffer_, 0, sizeof(chatInputBuffer_));
+            }
+            chatEnterWasDown_ = enterDown;
         }
     }
     ImGui::End();
@@ -304,8 +312,17 @@ void GameUI::addChatMessage(const std::string& sender, const std::string& text) 
 void GameUI::setChatOpen(bool open) {
     chatOpen_ = open;
     if (chatOpen_) {
+        const bool enterDown = glfwGetKey(window_, GLFW_KEY_ENTER) == GLFW_PRESS;
         std::memset(chatInputBuffer_, 0, sizeof(chatInputBuffer_));
         chatInputSubmitted_ = false;
+        pendingChatInput_.clear();
+        chatSubmitArmed_ = !enterDown;
+        chatEnterWasDown_ = enterDown;
+    } else {
+        chatSubmitArmed_ = true;
+        chatEnterWasDown_ = false;
+        std::memset(chatInputBuffer_, 0, sizeof(chatInputBuffer_));
+        pendingChatInput_.clear();
     }
 }
 
@@ -316,8 +333,8 @@ void GameUI::setRecipes(const std::vector<RecipeDefinition>& recipes) {
 std::string GameUI::consumePendingChatInput() {
     if (chatInputSubmitted_) {
         chatInputSubmitted_ = false;
-        std::string input(chatInputBuffer_);
-        std::memset(chatInputBuffer_, 0, sizeof(chatInputBuffer_));
+        std::string input = std::move(pendingChatInput_);
+        pendingChatInput_.clear();
         return input;
     }
     return "";
