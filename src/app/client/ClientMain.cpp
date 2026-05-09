@@ -94,7 +94,7 @@ int runDedicatedServer(int argc, char** argv) {
         return 1;
     }
 
-    std::cout << "VoxelGame dedicated server running on port " << port << ". Press Ctrl+C to stop.\n";
+    std::cout << "Terralite dedicated server running on port " << port << ". Press Ctrl+C to stop.\n";
     while (gServerRunning) {
         server.tick();
         std::this_thread::sleep_for(std::chrono::milliseconds(8));

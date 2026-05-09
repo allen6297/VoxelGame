@@ -11,7 +11,7 @@ class GameUI;
 struct GlfwClientWindowConfig {
     bool fullscreen = false;
     int swapInterval = 1;
-    std::string title = "Voxel Game";
+    std::string title = "TERRALITE";
 };
 
 class GlfwClientWindow {

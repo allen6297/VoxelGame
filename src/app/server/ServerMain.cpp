@@ -62,7 +62,7 @@ int main(int argc, char** argv) {
         const std::filesystem::path projectRoot = voxel::findProjectRoot();
         voxel::ServerContext context = voxel::loadServerContext(projectRoot);
         if (bootstrapOnly) {
-            std::cout << "VoxelServer bootstrap completed.\n";
+            std::cout << "TerraliteServer bootstrap completed.\n";
             return 0;
         }
 
@@ -74,13 +74,13 @@ int main(int argc, char** argv) {
             return 1;
         }
 
-        std::cout << "VoxelServer running. Press Ctrl+C to stop.\n";
+        std::cout << "TerraliteServer running. Press Ctrl+C to stop.\n";
         while (gRunning) {
             server.tick();
             std::this_thread::sleep_for(std::chrono::milliseconds(8));
         }
 
-        std::cout << "VoxelServer stopping.\n";
+        std::cout << "TerraliteServer stopping.\n";
         return 0;
     } catch (const std::exception& error) {
         std::cerr << "Fatal server error: " << error.what() << '\n';

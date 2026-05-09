@@ -18,26 +18,26 @@ std::filesystem::path getStandardSavePath() {
     if (SHGetKnownFolderPath(FOLDERID_RoamingAppData, 0, nullptr, &path) == S_OK) {
         std::filesystem::path base(path);
         CoTaskMemFree(path);
-        return base / "VoxelGame";
+        return base / "TERRALITE";
     }
     // Fallback if SHGetKnownFolderPath fails
     const char* appdata = std::getenv("APPDATA");
     if (appdata) {
-        return std::filesystem::path(appdata) / "VoxelGame";
+        return std::filesystem::path(appdata) / "TERRALITE";
     }
 #elif defined(__APPLE__)
     const char* home = std::getenv("HOME");
     if (home) {
-        return std::filesystem::path(home) / "Library" / "Application Support" / "VoxelGame";
+        return std::filesystem::path(home) / "Library" / "Application Support" / "TERRALITE";
     }
 #else // Linux/Unix
     const char* xdg_data = std::getenv("XDG_DATA_HOME");
     if (xdg_data) {
-        return std::filesystem::path(xdg_data) / "VoxelGame";
+        return std::filesystem::path(xdg_data) / "TERRALITE";
     }
     const char* home = std::getenv("HOME");
     if (home) {
-        return std::filesystem::path(home) / ".local" / "share" / "VoxelGame";
+        return std::filesystem::path(home) / ".local" / "share" / "TERRALITE";
     }
 #endif
     // Extreme fallback

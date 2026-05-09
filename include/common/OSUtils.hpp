@@ -4,9 +4,9 @@
 namespace voxel {
     /**
      * Returns the standard OS path for application data.
-     * Windows: %APPDATA%\VoxelGame
-     * Linux: ~/.local/share/VoxelGame (or $XDG_DATA_HOME)
-     * macOS: ~/Library/Application Support/VoxelGame
+     * Windows: %APPDATA%\TERRALITE
+     * Linux: ~/.local/share/TERRALITE (or $XDG_DATA_HOME)
+     * macOS: ~/Library/Application Support/TERRALITE
      */
     std::filesystem::path getStandardSavePath();
 }

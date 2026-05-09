@@ -1,5 +1,5 @@
 /**
- * Voxel Game — Pack Scripting API
+ * TERRALITE — Pack Scripting API
  *
  * GENERATED FILE — do not edit by hand.
  * Source:      tools/codegen/schema/{biome,block,item,recipe,tag}.js

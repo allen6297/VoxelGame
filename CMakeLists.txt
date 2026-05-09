@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(VoxelGame LANGUAGES CXX)
+project(Terralite LANGUAGES CXX)
 include(FetchContent)
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
@@ -7,7 +7,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 # Allow older third-party CMakeLists (e.g. miniz) that declare cmake_minimum < 3.5
 set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
 
-set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
@@ -26,7 +26,7 @@ endif()
 FetchContent_Declare(
     quickjs
     GIT_REPOSITORY https://github.com/quickjs-ng/quickjs.git
-    GIT_TAG        v0.9.0
+    GIT_TAG        v0.14.0
     GIT_SHALLOW    TRUE
 )
 FetchContent_MakeAvailable(quickjs)
@@ -89,6 +89,11 @@ FetchContent_Declare(
     GIT_SHALLOW    TRUE
 )
 FetchContent_MakeAvailable(RmlUi)
+set_target_properties(rmlui_core PROPERTIES
+    CXX_STANDARD 20
+    CXX_STANDARD_REQUIRED ON
+    CXX_EXTENSIONS OFF
+)
 
 # ── Dear ImGui (debug overlay) ────────────────────────────────────────────────
 FetchContent_Declare(
@@ -204,7 +209,7 @@ target_include_directories(voxel_core PUBLIC
     ${enet_SOURCE_DIR}/include
     ${quickjs_SOURCE_DIR}
 )
-target_compile_features(voxel_core PUBLIC cxx_std_20)
+target_compile_features(voxel_core PUBLIC cxx_std_23)
 target_link_libraries(voxel_core PUBLIC
     enet
     EnTT::EnTT
@@ -225,7 +230,7 @@ target_include_directories(voxel_server_support PUBLIC
     ${enet_SOURCE_DIR}/include
     ${quickjs_SOURCE_DIR}
 )
-target_compile_features(voxel_server_support PUBLIC cxx_std_20)
+target_compile_features(voxel_server_support PUBLIC cxx_std_23)
 target_link_libraries(voxel_server_support PUBLIC voxel_core)
 
 add_library(voxel_client_support STATIC
@@ -261,7 +266,7 @@ target_include_directories(voxel_client_support PUBLIC
     ${imgui_SOURCE_DIR}
     ${imgui_SOURCE_DIR}/backends
 )
-target_compile_features(voxel_client_support PUBLIC cxx_std_20)
+target_compile_features(voxel_client_support PUBLIC cxx_std_23)
 target_compile_definitions(voxel_client_support PRIVATE VOXEL_CLIENT)
 target_link_libraries(voxel_client_support PUBLIC
     voxel_core
@@ -274,29 +279,29 @@ if(WIN32)
     target_link_libraries(voxel_core PUBLIC ws2_32 winmm)
 endif()
 
-add_executable(VoxelGame
+add_executable(Terralite
     src/app/client/ClientNetworkSession.cpp
     src/app/client/ClientOptions.cpp
     src/app/client/ClientRuntimeBridge.cpp
     src/app/client/ClientUiController.cpp
     src/app/client/ClientMain.cpp
 )
-target_link_libraries(VoxelGame PRIVATE
+target_link_libraries(Terralite PRIVATE
     voxel_client_support
     voxel_server_support
 )
 
-add_executable(VoxelServer
+add_executable(TerraliteServer
     src/app/server/ServerMain.cpp
 )
-target_link_libraries(VoxelServer PRIVATE
+target_link_libraries(TerraliteServer PRIVATE
     voxel_server_support
 )
 
-add_executable(VoxelDataTests
+add_executable(TerraliteDataTests
     tests/GameDataTests.cpp
 )
-target_link_libraries(VoxelDataTests PRIVATE voxel_core)
+target_link_libraries(TerraliteDataTests PRIVATE voxel_core)
 
 # ── Code generation ───────────────────────────────────────────────────────────
 find_program(NODEJS node)
@@ -327,27 +332,27 @@ if(APPLE)
 endif()
 
 enable_testing()
-add_test(NAME VoxelDataTests COMMAND VoxelDataTests)
+add_test(NAME TerraliteDataTests COMMAND TerraliteDataTests)
 
 
 # ── Install & CPack (distributable package) ───────────────────────────────────
-install(TARGETS VoxelGame
+install(TARGETS Terralite
     RUNTIME DESTINATION .   # Windows/Linux: place exe at package root
     BUNDLE  DESTINATION .   # macOS: place .app at package root
 )
 install(DIRECTORY ${CMAKE_SOURCE_DIR}/packs/ DESTINATION packs)
 
-set(CPACK_PACKAGE_NAME        "VoxelGame")
+set(CPACK_PACKAGE_NAME        "Terralite")
 set(CPACK_PACKAGE_VERSION     "0.1.0")
 set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "A voxel survival game")
-set(CPACK_PACKAGE_INSTALL_DIRECTORY   "VoxelGame")
+set(CPACK_PACKAGE_INSTALL_DIRECTORY   "Terralite")
 
 if(APPLE)
     set(CPACK_GENERATOR "DragNDrop")
 elseif(WIN32)
     # Produces both a ZIP and an NSIS installer (NSIS must be installed)
     set(CPACK_GENERATOR "ZIP;NSIS")
-    set(CPACK_NSIS_DISPLAY_NAME "VoxelGame")
+    set(CPACK_NSIS_DISPLAY_NAME "Terralite")
     set(CPACK_NSIS_ENABLE_UNINSTALL_BEFORE_INSTALL ON)
 else()
     set(CPACK_GENERATOR "TGZ")

@@ -35,4 +35,4 @@ jobs:
         run: cmake --build build --config Release
 
       - name: Headless server smoke test
-        run: ./build/VoxelServer --bootstrap-only
+        run: ./build/TerraliteServer --bootstrap-only

@@ -364,7 +364,7 @@ function genDtsMainInterface(schema) {
 function genDts(schemas) {
     const banner = [
         '/**',
-        ' * Voxel Game — Pack Scripting API',
+        ' * TERRALITE — Pack Scripting API',
         ' *',
         ' * GENERATED FILE — do not edit by hand.',
         ` * Source:      ${SCHEMA_SOURCE_LABEL}`,
