@@ -298,10 +298,50 @@ target_link_libraries(TerraliteServer PRIVATE
     voxel_server_support
 )
 
+add_library(launcher_core STATIC
+    src/launcher/LauncherCore.cpp
+    src/common/data/JsonValue.cpp
+)
+target_include_directories(launcher_core PUBLIC
+    include
+    include/common
+)
+target_compile_features(launcher_core PUBLIC cxx_std_23)
+
+add_executable(TerraliteLauncher
+    src/app/launcher/LauncherMain.cpp
+    ${IMGUI_SOURCES}
+)
+target_include_directories(TerraliteLauncher PRIVATE
+    include
+    ${imgui_SOURCE_DIR}
+    ${imgui_SOURCE_DIR}/backends
+)
+target_compile_features(TerraliteLauncher PRIVATE cxx_std_23)
+target_compile_definitions(TerraliteLauncher PRIVATE
+    TERRALITE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+target_link_libraries(TerraliteLauncher PRIVATE
+    launcher_core
+    ${GLFW_TARGET}
+    ${PLATFORM_LIBS}
+)
+if(APPLE)
+    target_compile_definitions(TerraliteLauncher PRIVATE GL_SILENCE_DEPRECATION)
+endif()
+
 add_executable(TerraliteDataTests
     tests/GameDataTests.cpp
 )
 target_link_libraries(TerraliteDataTests PRIVATE voxel_core)
+target_compile_definitions(TerraliteDataTests PRIVATE
+    TERRALITE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+
+add_executable(TerraliteLauncherCoreTests
+    tests/LauncherCoreTests.cpp
+)
+target_link_libraries(TerraliteLauncherCoreTests PRIVATE launcher_core)
 
 # ── Code generation ───────────────────────────────────────────────────────────
 find_program(NODEJS node)
@@ -332,11 +372,12 @@ if(APPLE)
 endif()
 
 enable_testing()
-add_test(NAME TerraliteDataTests COMMAND TerraliteDataTests)
+add_test(NAME TerraliteDataTests COMMAND $<TARGET_FILE:TerraliteDataTests>)
+add_test(NAME TerraliteLauncherCoreTests COMMAND $<TARGET_FILE:TerraliteLauncherCoreTests>)
 
 
 # ── Install & CPack (distributable package) ───────────────────────────────────
-install(TARGETS Terralite
+install(TARGETS Terralite TerraliteLauncher TerraliteServer
     RUNTIME DESTINATION .   # Windows/Linux: place exe at package root
     BUNDLE  DESTINATION .   # macOS: place .app at package root
 )

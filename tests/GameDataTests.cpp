@@ -9,6 +9,10 @@
 #include <unordered_map>
 #include <utility>
 
+#ifndef TERRALITE_SOURCE_DIR
+#define TERRALITE_SOURCE_DIR "."
+#endif
+
 namespace {
 
 using voxel::BlockDefinition;
@@ -123,7 +127,7 @@ int main() {
     ok &= expectThrowsValidation(invalid, "missing item");
 
     try {
-        const std::filesystem::path projectRoot = std::filesystem::current_path().parent_path();
+        const std::filesystem::path projectRoot = std::filesystem::path(TERRALITE_SOURCE_DIR);
         voxel::PackManager packManager;
         packManager.discover(projectRoot / "packs");
 
