@@ -28,6 +28,8 @@ ClientOptions parseClientOptions(int argc, char** argv) {
             options.window.fullscreen = true;
         } else if (arg == "--limit-fps" && i + 1 < argc) {
             options.window.swapInterval = std::stoi(argv[++i]);
+        } else if (arg == "--diligent") {
+            options.diligent = true;
         } else if (arg == "--diligent-proof") {
             options.diligentProof = true;
         } else if (arg == "--diligent-proof-frames" && i + 1 < argc) {
