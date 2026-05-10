@@ -7,7 +7,7 @@
 #include <iostream>
 #include <vector>
 
-#include <GLFW/glfw3.h>
+#include "render/RenderBackend.hpp"
 
 namespace voxel {
 namespace {
@@ -59,14 +59,14 @@ bool loadImage(const std::string& path, int& width, int& height, int& channelCou
 }
 }  // namespace
 
+TextureManager::TextureManager(const IRenderBackend& renderer)
+    : renderer_(renderer) {
+}
+
 TextureManager::~TextureManager() {
-    if (blackFallback_.glId != 0) {
-        glDeleteTextures(1, &blackFallback_.glId);
-    }
+    renderer_.destroyTexture(blackFallback_.handle);
     for (auto& [path, texture] : textures_) {
-        if (texture.glId != 0) {
-            glDeleteTextures(1, &texture.glId);
-        }
+        renderer_.destroyTexture(texture.handle);
     }
 }
 
@@ -79,27 +79,7 @@ TextureResource TextureManager::createTexture(
     TextureResource resource;
     resource.width = width;
     resource.height = height;
-
-    glGenTextures(1, &resource.glId);
-    glBindTexture(GL_TEXTURE_2D, resource.glId);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
-    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
-    glTexImage2D(
-        GL_TEXTURE_2D,
-        0,
-        channelCount == 4 ? GL_RGBA : GL_RGB,
-        width,
-        height,
-        0,
-        channelCount == 4 ? GL_RGBA : GL_RGB,
-        GL_UNSIGNED_BYTE,
-        pixels
-    );
-    glBindTexture(GL_TEXTURE_2D, 0);
-
+    resource.handle = renderer_.createTexture2D(width, height, channelCount, pixels);
     return resource;
 }
 
@@ -133,7 +113,7 @@ const TextureResource* TextureManager::find(const std::string& relativePath) con
 }
 
 const TextureResource& TextureManager::blackFallback() const {
-    if (blackFallback_.glId == 0) {
+    if (blackFallback_.handle.id == 0) {
         static constexpr unsigned char kBlackPixel[4] = {0, 0, 0, 255};
         blackFallback_ = createTexture(1, 1, 4, kBlackPixel);
     }

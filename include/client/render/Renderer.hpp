@@ -5,11 +5,13 @@
 
 #include "data/GameData.hpp"
 #include "Player.hpp"
-#include "render/TextureManager.hpp"
 #include "player/Inventory.hpp"
 #include "world/World.hpp"
 
 namespace voxel {
+struct ChunkMesh;
+class TextureManager;
+
 struct Color {
     float r;
     float g;
@@ -41,8 +43,8 @@ struct DebugOverlayData {
 
 void setPerspective(float fovYDegrees, float aspect, float nearPlane, float farPlane);
 void applyCameraView(const Vec3& eye, const Vec3& lookDirection);
-void renderMesh(const class ChunkMesh& mesh, const TextureManager& textures);
-void renderMeshWireframe(const class ChunkMesh& mesh, bool translucentOnly = false);
+void renderMesh(const ChunkMesh& mesh, const TextureManager& textures);
+void renderMeshWireframe(const ChunkMesh& mesh, bool translucentOnly = false);
 void drawHoveredFaceOverlay(const RaycastHit& hit);
 void drawCrosshair(int width, int height);
 void drawText(const std::string& text, float x, float y, float scale);

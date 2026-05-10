@@ -110,7 +110,10 @@ void Game::populateFaceTextures() {
 }
 
 Game::Game(GameData gameData, std::string assetsRoot, std::string playerName, NetworkManager* network)
-    : assetsRoot_(std::move(assetsRoot)), gameData_(std::move(gameData)), network_(network) {
+    : assetsRoot_(std::move(assetsRoot)),
+      gameData_(std::move(gameData)),
+      textureManager_(renderBackend_),
+      network_(network) {
     player_.name = std::move(playerName);
     if (network_ != nullptr && network_->mode() == NetworkManager::Mode::Server) {
         network_->setExternalBlockAuthority(true);
@@ -145,9 +148,13 @@ Game::Game(GameData gameData, std::string assetsRoot, std::string playerName, Ne
 Game::~Game() {
     pendingTerrain_.clear();
     pendingMeshes_.clear();
+    for (auto& upload : pendingMeshUploads_) {
+        renderBackend_.destroyChunkMesh(upload.mesh);
+    }
+    pendingMeshUploads_.clear();
     queuedMeshBuilds_.clear();
-    for (auto& [coord, mesh] : meshes_) destroyChunkMesh(mesh);
-    for (auto& [id, mesh] : iconMeshes_) destroyChunkMesh(mesh);
+    for (auto& [coord, mesh] : meshes_) renderBackend_.destroyChunkMesh(mesh);
+    for (auto& [id, mesh] : iconMeshes_) renderBackend_.destroyChunkMesh(mesh);
 }
 
 void Game::reloadContent() {
@@ -157,10 +164,14 @@ void Game::reloadContent() {
 void Game::reloadGameData() {
     pendingTerrain_.clear();
     pendingMeshes_.clear();
+    for (auto& upload : pendingMeshUploads_) {
+        renderBackend_.destroyChunkMesh(upload.mesh);
+    }
+    pendingMeshUploads_.clear();
     queuedMeshBuilds_.clear();
     blockTicks_ = {};
     blockTickGeneration_.clear();
-    for (auto& [id, mesh] : iconMeshes_) destroyChunkMesh(mesh);
+    for (auto& [id, mesh] : iconMeshes_) renderBackend_.destroyChunkMesh(mesh);
     iconMeshes_.clear();
 
     modelManager_ = ModelManager{};
@@ -178,7 +189,7 @@ void Game::reloadGameData() {
     coordsToRebuild.reserve(meshes_.size());
     for (auto& [coord, mesh] : meshes_) {
         coordsToRebuild.push_back(coord);
-        destroyChunkMesh(mesh);
+        renderBackend_.destroyChunkMesh(mesh);
     }
     meshes_.clear();
     for (const ChunkCoord& coord : coordsToRebuild) {

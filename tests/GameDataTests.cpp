@@ -134,6 +134,10 @@ int main() {
         voxel::ScriptManager scripts;
         scripts.setHostKind(voxel::ScriptHost::Server);
         GameData loadedData = scripts.loadGameData(packManager, projectRoot / "engine" / "scripts");
+        ok &= expect(loadedData.recipes.contains("base:oak_planks"),
+                     "base startup scripts should register oak planks recipe");
+        ok &= expect(loadedData.recipes.contains("base:crafting_table"),
+                     "base startup scripts should register crafting table recipe");
         scripts.setGameData(&loadedData);
         scripts.loadRuntimeScripts(packManager);
 

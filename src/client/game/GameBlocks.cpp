@@ -137,10 +137,11 @@ void Game::rebuildChunkMesh(const ChunkCoord& coord) {
         std::remove(queuedMeshBuilds_.begin(), queuedMeshBuilds_.end(), coord),
         queuedMeshBuilds_.end()
     );
+    discardPendingMeshUpload(coord);
 
     const auto it = meshes_.find(coord);
     if (it != meshes_.end()) {
-        destroyChunkMesh(it->second);
+        renderBackend_.destroyChunkMesh(it->second);
     }
 
     std::array<const Chunk*, 27> snapshot;
@@ -161,7 +162,7 @@ void Game::rebuildChunkMesh(const ChunkCoord& coord) {
     for (int i = 0; i < 27; ++i) neighbors[i] = snapshot[i];
 
     ChunkMesh newMesh = buildChunkMesh(neighbors, coord, gameData_, modelManager_);
-    uploadChunkMesh(newMesh);
+    renderBackend_.uploadChunkMesh(newMesh);
     meshes_[coord] = std::move(newMesh);
 }
 

@@ -1,0 +1,7 @@
+{
+    "parent": "models/blocks/cube_column.json",
+    "textures": {
+        "end":  "textures/blocks/crafting_table_top.ppm",
+        "side": "textures/blocks/crafting_table_side.ppm"
+    }
+}

@@ -2,6 +2,8 @@
 
 #include <format>
 #include <iostream>
+#include <cctype>
+#include <map>
 
 #include <GLFW/glfw3.h>
 #include <RmlUi/Core.h>
@@ -13,6 +15,36 @@
 #include <backends/imgui_impl_opengl2.h>
 
 namespace voxel {
+namespace {
+
+std::string displayNameForRecipeType(const std::string& type) {
+    if (type == "crafting") return "Crafting";
+    if (type == "smelting") return "Smelting";
+    if (type.empty()) return "Other";
+
+    std::string label = type;
+    label[0] = static_cast<char>(std::toupper(static_cast<unsigned char>(label[0])));
+    for (std::size_t i = 1; i < label.size(); ++i) {
+        if (label[i - 1] == '_' || label[i - 1] == '-' || label[i - 1] == ' ') {
+            label[i] = static_cast<char>(std::toupper(static_cast<unsigned char>(label[i])));
+        }
+    }
+    return label;
+}
+
+std::string displayNameForItemOrBlock(const GameData* gameData, const std::string& id) {
+    if (gameData != nullptr) {
+        if (const auto itemIt = gameData->items.find(id); itemIt != gameData->items.end()) {
+            return itemIt->second.name;
+        }
+        if (const auto blockIt = gameData->blocks.find(id); blockIt != gameData->blocks.end()) {
+            return blockIt->second.name;
+        }
+    }
+    return id;
+}
+
+}  // namespace
 
 // ── Constructor ───────────────────────────────────────────────────────────────
 
@@ -156,45 +188,46 @@ void GameUI::update() {
             if (recipes_.empty()) {
                 ImGui::Text("No recipes available.");
             } else {
+                std::map<std::string, std::vector<const RecipeDefinition*>> recipesByType;
                 for (const auto& recipe : recipes_) {
-                    ImGui::PushID(recipe.id.c_str());
-                    
-                    std::string outputName = recipe.output;
-                    if (gameData_) {
-                        if (auto it = gameData_->items.find(recipe.output); it != gameData_->items.end()) {
-                            outputName = it->second.name;
-                        } else if (auto itb = gameData_->blocks.find(recipe.output); itb != gameData_->blocks.end()) {
-                            outputName = itb->second.name;
-                        }
-                    }
+                    recipesByType[recipe.type.empty() ? "other" : recipe.type].push_back(&recipe);
+                }
 
-                    if (ImGui::CollapsingHeader(std::format("{} x{}", outputName, recipe.count).c_str())) {
-                        bool canCraft = true;
-                        ImGui::Text("Ingredients:");
-                        for (const auto& ingredient : recipe.ingredients) {
-                            std::string ingName = ingredient;
-                            if (gameData_) {
-                                if (auto it = gameData_->items.find(ingredient); it != gameData_->items.end()) {
-                                    ingName = it->second.name;
-                                } else if (auto itb = gameData_->blocks.find(ingredient); itb != gameData_->blocks.end()) {
-                                    ingName = itb->second.name;
+                if (ImGui::BeginTabBar("##recipe_type_tabs")) {
+                    for (const auto& [type, typedRecipes] : recipesByType) {
+                        const std::string tabLabel = std::format("{} ({})", displayNameForRecipeType(type), typedRecipes.size());
+                        if (!ImGui::BeginTabItem(tabLabel.c_str())) {
+                            continue;
+                        }
+
+                        for (const RecipeDefinition* recipe : typedRecipes) {
+                            ImGui::PushID(recipe->id.c_str());
+
+                            const std::string outputName = displayNameForItemOrBlock(gameData_, recipe->output);
+                            if (ImGui::CollapsingHeader(std::format("{} x{}", outputName, recipe->count).c_str())) {
+                                bool canCraft = true;
+                                ImGui::Text("Ingredients:");
+                                for (const auto& ingredient : recipe->ingredients) {
+                                    const std::string ingName = displayNameForItemOrBlock(gameData_, ingredient);
+                                    const bool has = hasItem(inventory_, ingredient, 1);
+                                    if (!has) canCraft = false;
+
+                                    ImGui::BulletText("%s %s", ingName.c_str(), has ? "(OK)" : "(Missing)");
                                 }
+
+                                ImGui::Separator();
+                                if (!canCraft) ImGui::BeginDisabled();
+                                if (ImGui::Button("Craft")) {
+                                    pendingCraftRequest_ = recipe->id;
+                                }
+                                if (!canCraft) ImGui::EndDisabled();
                             }
-
-                            bool has = hasItem(inventory_, ingredient, 1);
-                            if (!has) canCraft = false;
-                            
-                            ImGui::BulletText("%s %s", ingName.c_str(), has ? "(OK)" : "(Missing)");
+                            ImGui::PopID();
                         }
 
-                        ImGui::Separator();
-                        if (!canCraft) ImGui::BeginDisabled();
-                        if (ImGui::Button("Craft")) {
-                            pendingCraftRequest_ = recipe.id;
-                        }
-                        if (!canCraft) ImGui::EndDisabled();
+                        ImGui::EndTabItem();
                     }
-                    ImGui::PopID();
+                    ImGui::EndTabBar();
                 }
             }
         }

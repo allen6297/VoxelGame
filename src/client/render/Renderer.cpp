@@ -305,7 +305,7 @@ void renderMesh(const ChunkMesh& mesh, const TextureManager& textures) {
             glDepthMask(GL_FALSE);
         }
         for (const auto& surface : mesh.surfaces) {
-            if (surface.translucent != translucentPass || surface.vboId == 0 || surface.vertexCount == 0) {
+            if (surface.translucent != translucentPass || surface.vertexBuffer.id == 0 || surface.vertexCount == 0) {
                 continue;
             }
             const TextureResource* albedo = textures.find(surface.albedoTexturePath);
@@ -319,7 +319,7 @@ void renderMesh(const ChunkMesh& mesh, const TextureManager& textures) {
 
             shader.useSurface(albedo, emissive, textures.blackFallback(), surface.opacity);
 
-            glBindBuffer(GL_ARRAY_BUFFER, surface.vboId);
+            glBindBuffer(GL_ARRAY_BUFFER, surface.vertexBuffer.id);
             glVertexPointer  (3, GL_FLOAT, kStride, reinterpret_cast<const void*>(offsetof(MeshVertex, position)));
             glNormalPointer  (   GL_FLOAT, kStride, reinterpret_cast<const void*>(offsetof(MeshVertex, normal)));
             glColorPointer   (3, GL_FLOAT, kStride, reinterpret_cast<const void*>(offsetof(MeshVertex, color)));
@@ -352,10 +352,10 @@ void renderMeshWireframe(const ChunkMesh& mesh, const bool translucentOnly) {
 
     glEnableClientState(GL_VERTEX_ARRAY);
     for (const auto& surface : mesh.surfaces) {
-        if ((translucentOnly && !surface.translucent) || surface.vboId == 0 || surface.vertexCount == 0) {
+        if ((translucentOnly && !surface.translucent) || surface.vertexBuffer.id == 0 || surface.vertexCount == 0) {
             continue;
         }
-        glBindBuffer(GL_ARRAY_BUFFER, surface.vboId);
+        glBindBuffer(GL_ARRAY_BUFFER, surface.vertexBuffer.id);
         glVertexPointer(3, GL_FLOAT, sizeof(MeshVertex),
                         reinterpret_cast<const void*>(offsetof(MeshVertex, position)));
         glDrawArrays(GL_TRIANGLES, 0, surface.vertexCount);

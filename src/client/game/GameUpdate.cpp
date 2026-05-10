@@ -15,6 +15,8 @@ constexpr int kMaxTerrainJobs = 4;
 constexpr int kMaxMeshJobs = 8;
 constexpr int kMaxTerrainIntegrationsPerFrame = 2;
 constexpr int kMaxMeshUploadsPerFrame = 1;
+constexpr int kMaxMeshUploadSurfacesPerFrame = 2;
+constexpr std::size_t kMaxMeshUploadVerticesPerFrame = 12000;
 constexpr int kMaxTerrainQueuesPerFrame = 2;
 
 bool isWithinUnloadDistance(const ChunkCoord& coord, const ChunkCoord& playerChunk) {
@@ -99,9 +101,10 @@ void Game::applyNetworkBlockChanges() {
             std::remove(queuedMeshBuilds_.begin(), queuedMeshBuilds_.end(), coord),
             queuedMeshBuilds_.end()
         );
+        discardPendingMeshUpload(coord);
 
         if (const auto it = meshes_.find(coord); it != meshes_.end()) {
-            destroyChunkMesh(it->second);
+            renderBackend_.destroyChunkMesh(it->second);
             meshes_.erase(it);
         }
 
@@ -118,8 +121,9 @@ void Game::applyNetworkBlockChanges() {
             if (!chunkLoaded(simulation_.world(), neighbor)) {
                 continue;
             }
+            discardPendingMeshUpload(neighbor);
             if (const auto it = meshes_.find(neighbor); it != meshes_.end()) {
-                destroyChunkMesh(it->second);
+                renderBackend_.destroyChunkMesh(it->second);
                 meshes_.erase(it);
             }
             launchMeshBuild(neighbor);
@@ -139,8 +143,9 @@ void Game::applyNetworkBlockChanges() {
             }
             
             // Rebuild mesh
+            discardPendingMeshUpload(delta.coord);
             if (const auto meshIt = meshes_.find(delta.coord); meshIt != meshes_.end()) {
-                destroyChunkMesh(meshIt->second);
+                renderBackend_.destroyChunkMesh(meshIt->second);
                 meshes_.erase(meshIt);
             }
             launchMeshBuild(delta.coord);
@@ -237,6 +242,42 @@ void Game::collectPending(const ChunkCoord& playerChunk) {
         }
     }
 
+    int uploadedSurfaces = 0;
+    std::size_t uploadedVertices = 0;
+    while (!pendingMeshUploads_.empty() && uploadedSurfaces < kMaxMeshUploadSurfacesPerFrame) {
+        PendingMeshUpload& upload = pendingMeshUploads_.front();
+        const bool shouldKeep = chunkLoaded(simulation_.world(), upload.coord) &&
+            isWithinUnloadDistance(upload.coord, playerChunk) &&
+            meshes_.find(upload.coord) == meshes_.end();
+        if (!shouldKeep) {
+            renderBackend_.destroyChunkMesh(upload.mesh);
+            pendingMeshUploads_.pop_front();
+            continue;
+        }
+
+        while (upload.nextSurface < upload.mesh.surfaces.size() &&
+               upload.mesh.surfaces[upload.nextSurface].vertices.empty()) {
+            ++upload.nextSurface;
+        }
+
+        if (upload.nextSurface >= upload.mesh.surfaces.size()) {
+            meshes_[upload.coord] = std::move(upload.mesh);
+            pendingMeshUploads_.pop_front();
+            continue;
+        }
+
+        const std::size_t surfaceVertices = upload.mesh.surfaces[upload.nextSurface].vertices.size();
+        if (uploadedSurfaces > 0 && uploadedVertices + surfaceVertices > kMaxMeshUploadVerticesPerFrame) {
+            break;
+        }
+
+        if (renderBackend_.uploadChunkMeshSurface(upload.mesh, upload.nextSurface)) {
+            ++uploadedSurfaces;
+            uploadedVertices += surfaceVertices;
+        }
+        ++upload.nextSurface;
+    }
+
     int meshUploads = 0;
     for (auto it = pendingMeshes_.begin(); it != pendingMeshes_.end();) {
         if (it->future.wait_for(std::chrono::seconds(0)) == std::future_status::ready) {
@@ -250,11 +291,10 @@ void Game::collectPending(const ChunkCoord& playerChunk) {
             if (shouldUpload) {
                 const auto existing = meshes_.find(coord);
                 if (existing != meshes_.end()) {
-                    destroyChunkMesh(mesh);
+                    renderBackend_.destroyChunkMesh(mesh);
                     continue;
                 }
-                uploadChunkMesh(mesh);
-                meshes_[coord] = std::move(mesh);
+                pendingMeshUploads_.push_back({coord, std::move(mesh), 0});
                 ++meshUploads;
             }
         } else {
@@ -267,6 +307,17 @@ void Game::collectPending(const ChunkCoord& playerChunk) {
         it = queuedMeshBuilds_.erase(it);
         if (chunkLoaded(simulation_.world(), coord) && isWithinUnloadDistance(coord, playerChunk)) {
             launchMeshBuild(coord);
+        }
+    }
+}
+
+void Game::discardPendingMeshUpload(const ChunkCoord& coord) {
+    for (auto it = pendingMeshUploads_.begin(); it != pendingMeshUploads_.end();) {
+        if (it->coord == coord) {
+            renderBackend_.destroyChunkMesh(it->mesh);
+            it = pendingMeshUploads_.erase(it);
+        } else {
+            ++it;
         }
     }
 }
@@ -537,10 +588,11 @@ void Game::updateLoadedChunks(const ChunkCoord& playerChunk) {
             std::remove(queuedMeshBuilds_.begin(), queuedMeshBuilds_.end(), coord),
             queuedMeshBuilds_.end()
         );
+        discardPendingMeshUpload(coord);
         simulation_.world().chunks.erase(coord);
         const auto it = meshes_.find(coord);
         if (it != meshes_.end()) {
-            destroyChunkMesh(it->second);
+            renderBackend_.destroyChunkMesh(it->second);
             meshes_.erase(it);
         }
     }

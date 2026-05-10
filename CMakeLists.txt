@@ -11,6 +11,8 @@ set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+option(TERRALITE_ENABLE_DILIGENT "Enable experimental Diligent Engine integration hooks" OFF)
+
 if(APPLE)
     list(APPEND CMAKE_PREFIX_PATH
         "/opt/homebrew"
@@ -103,6 +105,19 @@ FetchContent_Declare(
     GIT_SHALLOW    TRUE
 )
 FetchContent_MakeAvailable(imgui)
+
+if(TERRALITE_ENABLE_DILIGENT)
+    set(DILIGENT_INSTALL_CORE OFF CACHE BOOL "" FORCE)
+    set(DILIGENT_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+    FetchContent_Declare(
+        DiligentCore
+        GIT_REPOSITORY https://github.com/DiligentGraphics/DiligentCore.git
+        GIT_TAG        v2.5.6
+        SOURCE_DIR     ${CMAKE_BINARY_DIR}/_deps/DiligentCore
+        GIT_SHALLOW    TRUE
+    )
+    FetchContent_MakeAvailable(DiligentCore)
+endif()
 
 set(IMGUI_SOURCES
     ${imgui_SOURCE_DIR}/imgui.cpp
@@ -244,6 +259,7 @@ add_library(voxel_client_support STATIC
     src/platform/glfw/GlfwClientWindow.cpp
     src/platform/glfw/GlfwInput.cpp
     src/client/render/ModelManager.cpp
+    src/client/render/OpenGLRenderBackend.cpp
     src/client/render/Renderer.cpp
     src/client/render/ShaderProgram.cpp
     src/client/render/TextureManager.cpp
@@ -261,6 +277,7 @@ target_include_directories(voxel_client_support PUBLIC
     src/common
     include/client/ui
     libraries
+    ${RmlUi_SOURCE_DIR}/Backends
     ${enet_SOURCE_DIR}/include
     ${quickjs_SOURCE_DIR}
     ${imgui_SOURCE_DIR}
@@ -275,6 +292,29 @@ target_link_libraries(voxel_client_support PUBLIC
     RmlUi::Core
     Freetype::Freetype
 )
+if(TERRALITE_ENABLE_DILIGENT)
+    set(TERRALITE_DILIGENT_BACKEND_LIBS
+        Diligent-GraphicsEngineOpenGL-shared
+        Diligent-GraphicsEngineVk-shared
+    )
+    if(WIN32)
+        list(APPEND TERRALITE_DILIGENT_BACKEND_LIBS
+            Diligent-GraphicsEngineD3D11-shared
+            Diligent-GraphicsEngineD3D12-shared
+        )
+    endif()
+
+    target_compile_definitions(voxel_client_support PUBLIC TERRALITE_ENABLE_DILIGENT=1)
+    target_include_directories(voxel_client_support PUBLIC
+        ${diligentcore_SOURCE_DIR}
+    )
+    target_link_libraries(voxel_client_support PUBLIC
+        Diligent-BuildSettings
+        ${TERRALITE_DILIGENT_BACKEND_LIBS}
+    )
+else()
+    target_compile_definitions(voxel_client_support PUBLIC TERRALITE_ENABLE_DILIGENT=0)
+endif()
 if(WIN32)
     target_link_libraries(voxel_core PUBLIC ws2_32 winmm)
 endif()
@@ -290,6 +330,9 @@ target_link_libraries(Terralite PRIVATE
     voxel_client_support
     voxel_server_support
 )
+if(TERRALITE_ENABLE_DILIGENT)
+    copy_required_dlls(Terralite)
+endif()
 
 add_executable(TerraliteServer
     src/app/server/ServerMain.cpp
@@ -400,10 +443,15 @@ set(CPACK_PACKAGE_INSTALL_DIRECTORY   "Terralite")
 if(APPLE)
     set(CPACK_GENERATOR "DragNDrop")
 elseif(WIN32)
-    # Produces both a ZIP and an NSIS installer (NSIS must be installed)
-    set(CPACK_GENERATOR "ZIP;NSIS")
-    set(CPACK_NSIS_DISPLAY_NAME "Terralite")
-    set(CPACK_NSIS_ENABLE_UNINSTALL_BEFORE_INSTALL ON)
+    find_program(MAKENSIS_EXECUTABLE makensis)
+    if(MAKENSIS_EXECUTABLE)
+        set(CPACK_GENERATOR "ZIP;NSIS")
+        set(CPACK_NSIS_DISPLAY_NAME "Terralite")
+        set(CPACK_NSIS_ENABLE_UNINSTALL_BEFORE_INSTALL ON)
+    else()
+        set(CPACK_GENERATOR "ZIP")
+        message(STATUS "NSIS not found; Windows packaging will generate ZIP only")
+    endif()
 else()
     set(CPACK_GENERATOR "TGZ")
 endif()

@@ -1,0 +1,7 @@
+{
+    "parent": "models/blocks/cube_column.json",
+    "textures": {
+        "end":  "textures/blocks/oak_log_top.ppm",
+        "side": "textures/blocks/oak_log_side.ppm"
+    }
+}

@@ -3,16 +3,20 @@
 #include <string>
 #include <unordered_map>
 
+#include "render/RenderResource.hpp"
+
 namespace voxel {
+class IRenderBackend;
+
 struct TextureResource {
-    unsigned int glId = 0;
+    RenderTextureHandle handle;
     int width = 0;
     int height = 0;
 };
 
 class TextureManager {
 public:
-    TextureManager() = default;
+    explicit TextureManager(const IRenderBackend& renderer);
     ~TextureManager();
 
     TextureManager(const TextureManager&) = delete;
@@ -25,6 +29,7 @@ public:
 private:
     TextureResource createTexture(int width, int height, int channelCount, const unsigned char* pixels) const;
 
+    const IRenderBackend& renderer_;
     std::unordered_map<std::string, TextureResource> textures_;
     mutable TextureResource blackFallback_ {};
 };

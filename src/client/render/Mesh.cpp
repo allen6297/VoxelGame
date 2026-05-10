@@ -5,11 +5,8 @@
 #include <cmath>
 #include <cstddef>
 
-#include <GLFW/glfw3.h>
-
 #include "Math.hpp"
 #include "render/ModelManager.hpp"
-#include "render/OpenGLCompat.hpp"
 #include "world/Chunk.hpp"
 
 namespace voxel {
@@ -550,31 +547,6 @@ ChunkMesh buildChunkMesh(
     }
 
     return mesh;
-}
-
-void uploadChunkMesh(ChunkMesh& mesh) {
-    for (auto& surface : mesh.surfaces) {
-        if (surface.vertices.empty()) continue;
-        surface.vertexCount = static_cast<int>(surface.vertices.size());
-        glGenBuffers(1, &surface.vboId);
-        glBindBuffer(GL_ARRAY_BUFFER, surface.vboId);
-        glBufferData(GL_ARRAY_BUFFER,
-                     static_cast<GLsizeiptr>(surface.vertices.size() * sizeof(MeshVertex)),
-                     surface.vertices.data(), GL_STATIC_DRAW);
-        glBindBuffer(GL_ARRAY_BUFFER, 0);
-        surface.vertices.clear();
-        surface.vertices.shrink_to_fit();
-    }
-}
-
-void destroyChunkMesh(ChunkMesh& mesh) {
-    for (auto& surface : mesh.surfaces) {
-        if (surface.vboId != 0) {
-            glDeleteBuffers(1, &surface.vboId);
-            surface.vboId      = 0;
-            surface.vertexCount = 0;
-        }
-    }
 }
 
 }  // namespace voxel

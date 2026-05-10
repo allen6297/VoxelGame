@@ -1,6 +1,7 @@
 #pragma once
 
 #include <future>
+#include <deque>
 #include <queue>
 #include <random>
 #include <unordered_map>
@@ -13,6 +14,7 @@
 #include "Player.hpp"
 #include "render/Mesh.hpp"
 #include "render/ModelManager.hpp"
+#include "render/OpenGLRenderBackend.hpp"
 #include "render/Renderer.hpp"
 #include "render/TextureManager.hpp"
 #include "world/TerrainGenerator.hpp"
@@ -45,6 +47,11 @@ private:
         ChunkCoord coord;
         std::future<ChunkMesh> future;
     };
+    struct PendingMeshUpload {
+        ChunkCoord coord;
+        ChunkMesh mesh;
+        std::size_t nextSurface = 0;
+    };
     struct ScheduledBlockTick {
         double dueTime = 0.0;
         Int3 block {0, 0, 0};
@@ -67,6 +74,7 @@ private:
     void updateLoadedChunks(const ChunkCoord& playerChunk);
     void launchMeshBuild(const ChunkCoord& coord);
     void collectPending(const ChunkCoord& playerChunk);
+    void discardPendingMeshUpload(const ChunkCoord& coord);
     void applyNetworkBlockChanges();
     void applyNetworkEntityChanges();
     void reloadGameData();
@@ -75,6 +83,7 @@ private:
     std::string assetsRoot_;
     bool f5WasPressed_ = false;
     GameData gameData_;
+    OpenGLRenderBackend renderBackend_;
     TextureManager textureManager_;
     ModelManager modelManager_;
     NetworkManager* network_ = nullptr;
@@ -84,6 +93,7 @@ private:
     std::unordered_map<ChunkCoord, std::future<Chunk>, ChunkCoordHash> pendingTerrain_;
     std::unordered_map<std::string, ChunkMesh> iconMeshes_;  // cached single-block meshes for hotbar icons
     std::vector<PendingMesh> pendingMeshes_;
+    std::deque<PendingMeshUpload> pendingMeshUploads_;
     std::vector<ChunkCoord> queuedMeshBuilds_;
     Player player_;
     InputState input_;

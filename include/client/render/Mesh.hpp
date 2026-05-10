@@ -5,6 +5,7 @@
 
 #include "data/GameData.hpp"
 #include "render/ModelManager.hpp"
+#include "render/RenderResource.hpp"
 #include "render/Renderer.hpp"
 #include "world/World.hpp"
 
@@ -23,7 +24,7 @@ struct MeshSurface {
     bool translucent = false;
     float opacity = 1.0f;
     std::vector<MeshVertex> vertices; // cleared after GPU upload
-    unsigned int vboId = 0;
+    RenderBufferHandle vertexBuffer;
     int vertexCount = 0;
 };
 
@@ -36,6 +37,4 @@ struct ChunkMesh {
 };
 
 ChunkMesh buildChunkMesh(const Chunk* neighbors[27], const ChunkCoord& coord, const GameData& gameData, const ModelManager& modelManager);
-void uploadChunkMesh(ChunkMesh& mesh);
-void destroyChunkMesh(ChunkMesh& mesh);
 }  // namespace voxel

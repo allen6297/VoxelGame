@@ -1,0 +1,6 @@
+{
+    "parent": "models/blocks/cube_all.json",
+    "textures": {
+        "all": "textures/blocks/oak_planks.ppm"
+    }
+}
