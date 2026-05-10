@@ -25,3 +25,4 @@ CMakeCache.txt
 **/.DS_Store
 
 .vs/
+.claude
