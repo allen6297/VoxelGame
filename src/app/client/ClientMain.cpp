@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <iostream>
+#include <memory>
 #include <string>
 #include <thread>
 
@@ -19,6 +20,7 @@
 #include "client/pack/AssetPackManager.hpp"
 #include "client/render/Mesh.hpp"
 #include "client/render/OpenGLRenderBackend.hpp"
+#include "client/render/RenderBackend.hpp"
 #include "client/render/TextureManager.hpp"
 #include "common/pack/PackManager.hpp"
 #include "common/pack/ScriptManager.hpp"
@@ -209,8 +211,23 @@ int main(int argc, char** argv) {
         voxel::NetworkManager* activeNetwork =
             voxel::startClientNetworkSession(network, clientOptions.network);
 
-        voxel::OpenGLRenderBackend glBackend;
-        voxel::Game   game(glBackend, std::move(gameData), assetsRoot, clientOptions.playerName, activeNetwork);
+        std::unique_ptr<voxel::IRenderBackend> renderBackend;
+#if TERRALITE_ENABLE_DILIGENT
+        if (clientOptions.diligent) {
+            auto diligent = std::make_unique<voxel::DiligentRenderBackend>();
+            diligent->initialize(window.handle(), fbWidth, fbHeight);
+            renderBackend = std::move(diligent);
+        }
+#endif
+        if (!renderBackend) {
+            if (clientOptions.diligent) {
+                std::cerr << "Warning: --diligent ignored (build lacks TERRALITE_ENABLE_DILIGENT).\n";
+            }
+            renderBackend = std::make_unique<voxel::OpenGLRenderBackend>();
+        }
+        std::cout << "Render backend: " << renderBackend->name() << '\n';
+
+        voxel::Game   game(*renderBackend, std::move(gameData), assetsRoot, clientOptions.playerName, activeNetwork);
         voxel::GameUI ui(window.handle(), fbWidth, fbHeight, assetsRoot);
         voxel::ClientRuntimeBridge runtimeBridge(
             scriptManager, network, activeNetwork, game, ui, clientOptions.playerName);
