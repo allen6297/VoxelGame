@@ -132,13 +132,19 @@ int runDiligentProof(voxel::GlfwClientWindow& window, const int frameLimit) {
     if (!proofMeshUploaded || !proofMesh.surfaces.front().vertexBuffer.isValid() || !proofTexture.isValid()) {
         throw std::runtime_error("Diligent proof-of-life resource creation failed.");
     }
-    std::cout << "Running " << backend.name() << " proof-of-life clear loop. Close the window to exit.\n";
+    std::cout << "Running " << backend.name() << " proof-of-life draw loop. Close the window to exit.\n";
 
     int renderedFrames = 0;
     while (!window.shouldClose() && (frameLimit <= 0 || renderedFrames < frameLimit)) {
         window.framebufferSize(fbWidth, fbHeight);
         backend.resize(fbWidth, fbHeight);
         backend.clearFrame({0.08f, 0.10f, 0.14f});
+
+        const float aspect = fbHeight > 0 ? static_cast<float>(fbWidth) / static_cast<float>(fbHeight) : 1.f;
+        backend.setPerspective(60.f, aspect, 0.1f, 100.f);
+        backend.applyCameraView({0.f, 0.f, -3.f}, {0.f, 0.f, 1.f});
+        backend.renderMesh(proofMesh);
+
         backend.present();
         window.pollEvents();
         ++renderedFrames;
