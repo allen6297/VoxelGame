@@ -431,36 +431,22 @@ void DiligentRenderBackend::initialize(GLFWwindow* window, const int width, cons
 }
 
 // ---------------------------------------------------------------------------
-// resize
+// beginFrame  (resize if needed, then clear)
 // ---------------------------------------------------------------------------
-void DiligentRenderBackend::resize(const int width, const int height) {
+void DiligentRenderBackend::beginFrame(const int width, const int height, const Color& clearColor) const {
 #if TERRALITE_ENABLE_DILIGENT
-    if (impl_->swapChain == nullptr || width <= 0 || height <= 0) return;
-    if (impl_->width == width && impl_->height == height) return;
-
-    impl_->swapChain->Resize(static_cast<Diligent::Uint32>(width), static_cast<Diligent::Uint32>(height));
-    impl_->width  = width;
-    impl_->height = height;
-
-    createDepthBuffer(impl_->device, width, height, impl_->depthBuffer, impl_->depthView);
-#else
-    (void)width;
-    (void)height;
-#endif
-}
-
-// ---------------------------------------------------------------------------
-// clearFrame
-// ---------------------------------------------------------------------------
-void DiligentRenderBackend::clearFrame(const Color& clearColor) {
-#if TERRALITE_ENABLE_DILIGENT
+    if (impl_->swapChain != nullptr && width > 0 && height > 0) {
+        if (impl_->width != width || impl_->height != height) {
+            impl_->swapChain->Resize(static_cast<Diligent::Uint32>(width), static_cast<Diligent::Uint32>(height));
+            impl_->width  = width;
+            impl_->height = height;
+            createDepthBuffer(impl_->device, width, height, impl_->depthBuffer, impl_->depthView);
+        }
+    }
     if (impl_->context == nullptr || impl_->swapChain == nullptr) return;
-
     Diligent::ITextureView* rtv = impl_->swapChain->GetCurrentBackBufferRTV();
     impl_->context->SetRenderTargets(
-        1,
-        &rtv,
-        impl_->depthView,
+        1, &rtv, impl_->depthView,
         Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION
     );
     const float color[] = {clearColor.r, clearColor.g, clearColor.b, 1.0f};
@@ -469,25 +455,31 @@ void DiligentRenderBackend::clearFrame(const Color& clearColor) {
         impl_->context->ClearDepthStencil(
             impl_->depthView,
             Diligent::CLEAR_DEPTH_FLAG,
-            1.f,
-            0,
+            1.f, 0,
             Diligent::RESOURCE_STATE_TRANSITION_MODE_TRANSITION
         );
     }
 #else
-    (void)clearColor;
+    (void)width; (void)height; (void)clearColor;
 #endif
 }
 
 // ---------------------------------------------------------------------------
-// present
+// endFrame  (present)
 // ---------------------------------------------------------------------------
-void DiligentRenderBackend::present() {
+void DiligentRenderBackend::endFrame() const {
 #if TERRALITE_ENABLE_DILIGENT
     if (impl_->swapChain != nullptr) {
         impl_->swapChain->Present();
     }
 #endif
+}
+
+// ---------------------------------------------------------------------------
+// currentViewport
+// ---------------------------------------------------------------------------
+RenderViewport DiligentRenderBackend::currentViewport() const {
+    return {0, 0, impl_->width, impl_->height};
 }
 
 // ---------------------------------------------------------------------------
@@ -498,7 +490,7 @@ void DiligentRenderBackend::setPerspective(
     const float aspect,
     const float nearPlane,
     const float farPlane
-) {
+) const {
 #if TERRALITE_ENABLE_DILIGENT
     const float f = 1.0f / std::tan(fovYDegrees * kPi / 360.0f);
     float* P = impl_->proj;
@@ -516,7 +508,7 @@ void DiligentRenderBackend::setPerspective(
 // ---------------------------------------------------------------------------
 // applyCameraView  (row-major LookAtLH)
 // ---------------------------------------------------------------------------
-void DiligentRenderBackend::applyCameraView(const Vec3& eye, const Vec3& lookDirection) {
+void DiligentRenderBackend::applyCameraView(const Vec3& eye, const Vec3& lookDirection) const {
 #if TERRALITE_ENABLE_DILIGENT
     float zx = lookDirection.x, zy = lookDirection.y, zz = lookDirection.z;
     normalize3(zx, zy, zz);
@@ -546,7 +538,7 @@ void DiligentRenderBackend::applyCameraView(const Vec3& eye, const Vec3& lookDir
 // ---------------------------------------------------------------------------
 // renderMesh
 // ---------------------------------------------------------------------------
-void DiligentRenderBackend::renderMesh(const ChunkMesh& mesh, const TextureManager* textures) {
+void DiligentRenderBackend::renderMesh(const ChunkMesh& mesh, const TextureManager& textures) const {
 #if TERRALITE_ENABLE_DILIGENT
     if (impl_->pso == nullptr || impl_->srb == nullptr || impl_->vsConstants == nullptr) return;
     if (impl_->context == nullptr || impl_->albedoVar == nullptr) return;
@@ -573,8 +565,8 @@ void DiligentRenderBackend::renderMesh(const ChunkMesh& mesh, const TextureManag
 
     // Helper: resolve albedo SRV from TextureManager (falls back to white).
     auto resolveSrv = [&](const std::string& path) -> Diligent::ITextureView* {
-        if (textures != nullptr && !path.empty()) {
-            const TextureResource* res = textures->find(path);
+        if (!path.empty()) {
+            const TextureResource* res = textures.find(path);
             if (res != nullptr) {
                 auto texIt = impl_->textures.find(res->handle.diligentId());
                 if (texIt != impl_->textures.end()) {
@@ -638,7 +630,7 @@ void DiligentRenderBackend::renderMesh(const ChunkMesh& mesh, const TextureManag
 // ---------------------------------------------------------------------------
 // Buffer / texture resource management
 // ---------------------------------------------------------------------------
-RenderBufferHandle DiligentRenderBackend::createVertexBuffer(const std::size_t byteCount, const void* data) {
+RenderBufferHandle DiligentRenderBackend::createVertexBuffer(const std::size_t byteCount, const void* data) const {
 #if TERRALITE_ENABLE_DILIGENT
     if (impl_->device == nullptr || data == nullptr || byteCount == 0) return {};
 
@@ -665,7 +657,7 @@ RenderBufferHandle DiligentRenderBackend::createVertexBuffer(const std::size_t b
 #endif
 }
 
-void DiligentRenderBackend::destroyBuffer(RenderBufferHandle& buffer) {
+void DiligentRenderBackend::destroyBuffer(RenderBufferHandle& buffer) const {
 #if TERRALITE_ENABLE_DILIGENT
     const std::uintptr_t id = buffer.diligentId();
     if (id != 0) {
@@ -682,7 +674,7 @@ RenderTextureHandle DiligentRenderBackend::createTexture2D(
     const int height,
     const int channelCount,
     const unsigned char* pixels
-) {
+) const {
 #if TERRALITE_ENABLE_DILIGENT
     if (impl_->device == nullptr || pixels == nullptr || width <= 0 || height <= 0) return {};
     if (channelCount != 3 && channelCount != 4) return {};
@@ -731,7 +723,7 @@ RenderTextureHandle DiligentRenderBackend::createTexture2D(
 #endif
 }
 
-void DiligentRenderBackend::destroyTexture(RenderTextureHandle& texture) {
+void DiligentRenderBackend::destroyTexture(RenderTextureHandle& texture) const {
 #if TERRALITE_ENABLE_DILIGENT
     const std::uintptr_t id = texture.diligentId();
     if (id != 0) {
@@ -743,13 +735,13 @@ void DiligentRenderBackend::destroyTexture(RenderTextureHandle& texture) {
 #endif
 }
 
-void DiligentRenderBackend::uploadChunkMesh(ChunkMesh& mesh) {
+void DiligentRenderBackend::uploadChunkMesh(ChunkMesh& mesh) const {
     for (std::size_t surfaceIndex = 0; surfaceIndex < mesh.surfaces.size(); ++surfaceIndex) {
         uploadChunkMeshSurface(mesh, surfaceIndex);
     }
 }
 
-bool DiligentRenderBackend::uploadChunkMeshSurface(ChunkMesh& mesh, const std::size_t surfaceIndex) {
+bool DiligentRenderBackend::uploadChunkMeshSurface(ChunkMesh& mesh, const std::size_t surfaceIndex) const {
     if (surfaceIndex >= mesh.surfaces.size()) return false;
 
     MeshSurface& surface = mesh.surfaces[surfaceIndex];
@@ -769,7 +761,7 @@ bool DiligentRenderBackend::uploadChunkMeshSurface(ChunkMesh& mesh, const std::s
     return true;
 }
 
-void DiligentRenderBackend::destroyChunkMesh(ChunkMesh& mesh) {
+void DiligentRenderBackend::destroyChunkMesh(ChunkMesh& mesh) const {
     for (auto& surface : mesh.surfaces) {
         destroyBuffer(surface.vertexBuffer);
         surface.vertexCount = 0;

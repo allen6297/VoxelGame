@@ -109,9 +109,10 @@ void Game::populateFaceTextures() {
     }
 }
 
-Game::Game(GameData gameData, std::string assetsRoot, std::string playerName, NetworkManager* network)
+Game::Game(IRenderBackend& backend, GameData gameData, std::string assetsRoot, std::string playerName, NetworkManager* network)
     : assetsRoot_(std::move(assetsRoot)),
       gameData_(std::move(gameData)),
+      renderBackend_(backend),
       textureManager_(renderBackend_),
       network_(network) {
     player_.name = std::move(playerName);

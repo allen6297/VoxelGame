@@ -14,7 +14,7 @@
 #include "Player.hpp"
 #include "render/Mesh.hpp"
 #include "render/ModelManager.hpp"
-#include "render/OpenGLRenderBackend.hpp"
+#include "render/RenderBackend.hpp"
 #include "render/Renderer.hpp"
 #include "render/TextureManager.hpp"
 #include "world/TerrainGenerator.hpp"
@@ -24,7 +24,7 @@
 namespace voxel {
 class Game {
 public:
-    Game(GameData gameData, std::string assetsRoot, std::string playerName, NetworkManager* network = nullptr);
+    Game(IRenderBackend& backend, GameData gameData, std::string assetsRoot, std::string playerName, NetworkManager* network = nullptr);
     ~Game();
     void update(const ClientInputFrame& input, float deltaTime);
     void reloadContent();
@@ -83,7 +83,7 @@ private:
     std::string assetsRoot_;
     bool f5WasPressed_ = false;
     GameData gameData_;
-    OpenGLRenderBackend renderBackend_;
+    IRenderBackend& renderBackend_;
     TextureManager textureManager_;
     ModelManager modelManager_;
     NetworkManager* network_ = nullptr;

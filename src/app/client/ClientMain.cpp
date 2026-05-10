@@ -18,6 +18,8 @@
 #include "common/network/NetworkManager.hpp"
 #include "client/pack/AssetPackManager.hpp"
 #include "client/render/Mesh.hpp"
+#include "client/render/OpenGLRenderBackend.hpp"
+#include "client/render/TextureManager.hpp"
 #include "common/pack/PackManager.hpp"
 #include "common/pack/ScriptManager.hpp"
 #include "server/HeadlessServer.hpp"
@@ -114,6 +116,7 @@ int runDiligentProof(voxel::GlfwClientWindow& window, const int frameLimit) {
 
     voxel::DiligentRenderBackend backend;
     backend.initialize(window.handle(), fbWidth, fbHeight);
+    voxel::TextureManager proofTextures(backend);
     voxel::ChunkMesh proofMesh;
     proofMesh.surfaces.push_back({});
     proofMesh.surfaces.back().vertices = {
@@ -137,15 +140,14 @@ int runDiligentProof(voxel::GlfwClientWindow& window, const int frameLimit) {
     int renderedFrames = 0;
     while (!window.shouldClose() && (frameLimit <= 0 || renderedFrames < frameLimit)) {
         window.framebufferSize(fbWidth, fbHeight);
-        backend.resize(fbWidth, fbHeight);
-        backend.clearFrame({0.08f, 0.10f, 0.14f});
+        backend.beginFrame(fbWidth, fbHeight, {0.08f, 0.10f, 0.14f});
 
         const float aspect = fbHeight > 0 ? static_cast<float>(fbWidth) / static_cast<float>(fbHeight) : 1.f;
         backend.setPerspective(60.f, aspect, 0.1f, 100.f);
         backend.applyCameraView({0.f, 0.f, -3.f}, {0.f, 0.f, 1.f});
-        backend.renderMesh(proofMesh);
+        backend.renderMesh(proofMesh, proofTextures);
 
-        backend.present();
+        backend.endFrame();
         window.pollEvents();
         ++renderedFrames;
     }
@@ -207,7 +209,8 @@ int main(int argc, char** argv) {
         voxel::NetworkManager* activeNetwork =
             voxel::startClientNetworkSession(network, clientOptions.network);
 
-        voxel::Game   game(std::move(gameData), assetsRoot, clientOptions.playerName, activeNetwork);
+        voxel::OpenGLRenderBackend glBackend;
+        voxel::Game   game(glBackend, std::move(gameData), assetsRoot, clientOptions.playerName, activeNetwork);
         voxel::GameUI ui(window.handle(), fbWidth, fbHeight, assetsRoot);
         voxel::ClientRuntimeBridge runtimeBridge(
             scriptManager, network, activeNetwork, game, ui, clientOptions.playerName);
