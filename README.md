@@ -21,7 +21,7 @@ Launcher:
 Native macOS Swift launcher:
 
 ```sh
-./script/build_and_run.sh
+./scripts/build_and_run.sh
 ```
 
 Offline client:
@@ -82,7 +82,7 @@ Relative executable and working-directory paths are resolved from the manifest f
 
 The ImGui launcher can install the current local build into this layout with `Install current local build`. That copies the built `Terralite` and `TerraliteServer` executables plus the repo `packs/` directory into a version folder, then writes `manifest.json` for that installed copy.
 
-The Swift launcher lives at `platform/apple/TerraliteLauncherSwift` and uses the same `launcher.json` and version manifest layout as the ImGui launcher. The repo `Run` action is wired to `script/build_and_run.sh`, which builds the SwiftPM app, stages `dist/TerraliteLauncherSwift.app`, and opens it as a normal macOS app bundle.
+The Swift launcher lives at `platform/apple/TerraliteLauncherSwift` and uses the same `launcher.json` and version manifest layout as the ImGui launcher. The repo `Run` action is wired to `scripts/build_and_run.sh`, which builds the SwiftPM app, stages `dist/TerraliteLauncherSwiftStandalone.app`, and opens it as a normal macOS app bundle.
 
 ## Project Layout
 
@@ -92,9 +92,12 @@ The Swift launcher lives at `platform/apple/TerraliteLauncherSwift` and uses the
 - `src/app`: executable entrypoints and app-layer wiring for client/server.
 - `src/launcher` and `include/launcher`: platform-neutral launcher core for accounts, versions, config, and process launch.
 - `platform/apple/TerraliteLauncherSwift`: native SwiftUI macOS launcher using the same launcher data files.
+- `cmake`: split build configuration for dependencies, targets/tests/codegen, and packaging.
+- `docs`: project and pack-authoring documentation.
 - `engine/scripts`: built-in JavaScript APIs exposed to packs.
 - `packs/base`: base game content, scripts, models, textures, and UI assets.
 - `packs/types`: generated schema, TypeScript declarations, and editor snippets for pack authors.
+- `third_party`: vendored single-header libraries used by the C++ targets.
 - `tools/codegen`: schema-driven generation for C++ script bindings and pack-authoring metadata.
 
 ## Near-Term Roadmap

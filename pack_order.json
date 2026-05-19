@@ -1,6 +1,7 @@
 {
   "order": [
     "types",
+    "example_pack",
     "base"
   ]
 }

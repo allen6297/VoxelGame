@@ -1,0 +1,21 @@
+{
+  "id":   "example_pack:copper_ore",
+  "name": "Copper Ore",
+  "voxel": {
+    "solid":       true,
+    "translucent": false,
+    "material":    "terrain"
+  },
+  "render": {
+    "type":    "cube",
+    "color":   [0.72, 0.45, 0.20],
+    "opacity": 1.0,
+    "texture": { "albedo": "textures/blocks/copper_ore.ppm" }
+  },
+  "drops": [
+    { "item": "example_pack:raw_copper", "count": 1 }
+  ],
+  "properties": {
+    "hardness": 3.0
+  }
+}

@@ -3,9 +3,9 @@
  * tools/codegen/generate.js
  *
  * Reads schema files and emits:
- *   include/common/pack/generated/ParseBindings.hpp  — parse function declarations
- *   src/common/pack/generated/ParseBindings.cpp      — parse function implementations
- *   packs/types/voxel.d.ts                    — TypeScript type declarations
+ *   include/common/pack/generated/ParseBindings.hpp — parse function declarations
+ *   src/common/pack/generated/ParseBindings.cpp — parse function implementations
+ *   packs/types/voxel.d.ts — TypeScript type declarations
  *
  * Usage:
  *   node tools/codegen/generate.js
@@ -710,7 +710,7 @@ console.log('codegen: generating bindings...')
 write(path.join(ROOT, 'include/common/pack/generated/ParseBindings.hpp'), genCppHeader(SCHEMAS))
 write(path.join(ROOT, 'src/common/pack/generated/ParseBindings.cpp'), genCppSource(SCHEMAS))
 write(path.join(ROOT, 'packs/types/voxel.d.ts'), genDts(SCHEMAS))
-write(path.join(ROOT, 'documentation/PackSchema.md'), genMarkdownDocs(SCHEMAS))
+write(path.join(ROOT, 'docs/PackSchema.md'), genMarkdownDocs(SCHEMAS))
 write(path.join(ROOT, 'packs/types/pack.schema.json'), genJsonSchema(SCHEMAS))
 write(path.join(ROOT, 'packs/types/schema-dump.json'), genSchemaDump(SCHEMAS))
 write(path.join(ROOT, 'packs/types/voxel.code-snippets'), genSnippets())
