@@ -479,7 +479,11 @@ void DiligentRenderBackend::endFrame() const {
 // currentViewport
 // ---------------------------------------------------------------------------
 RenderViewport DiligentRenderBackend::currentViewport() const {
+#if TERRALITE_ENABLE_DILIGENT
     return {0, 0, impl_->width, impl_->height};
+#else
+    return {0, 0, 0, 0};
+#endif
 }
 
 // ---------------------------------------------------------------------------

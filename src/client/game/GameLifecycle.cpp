@@ -147,6 +147,7 @@ Game::Game(IRenderBackend& backend, GameData gameData, std::string assetsRoot, s
 }
 
 Game::~Game() {
+    waitForPendingJobs();
     pendingTerrain_.clear();
     pendingMeshes_.clear();
     for (auto& upload : pendingMeshUploads_) {
@@ -163,6 +164,7 @@ void Game::reloadContent() {
 }
 
 void Game::reloadGameData() {
+    waitForPendingJobs();
     pendingTerrain_.clear();
     pendingMeshes_.clear();
     for (auto& upload : pendingMeshUploads_) {

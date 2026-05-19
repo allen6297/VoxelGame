@@ -129,6 +129,8 @@ void Game::handleInventorySelection(const ClientInputFrame& input) {
 }
 
 void Game::rebuildChunkMesh(const ChunkCoord& coord) {
+    ScopedEngineTimer meshBuildTimer(diagnostics_, EnginePhase::MeshBuild);
+
     if (!inChunkBounds(coord) || !chunkLoaded(simulation_.world(), coord)) {
         return;
     }

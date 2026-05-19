@@ -44,6 +44,39 @@ std::string displayNameForItemOrBlock(const GameData* gameData, const std::strin
     return id;
 }
 
+ImVec4 budgetColor(const double value, const double budgetMs) {
+    if (value > budgetMs) {
+        return {1.0f, 0.34f, 0.25f, 1.0f};
+    }
+    if (value > budgetMs * 0.75) {
+        return {1.0f, 0.78f, 0.25f, 1.0f};
+    }
+    return ImGui::GetStyleColorVec4(ImGuiCol_Text);
+}
+
+void drawBudgetTiming(const char* label, const double valueMs, const double budgetMs) {
+    const ImVec4 color = budgetColor(valueMs, budgetMs);
+    ImGui::TextColored(color, "%-6s %.2f ms / %.1f", label, valueMs, budgetMs);
+}
+
+void drawBudgetQueue(const char* label, const int value, const int budget) {
+    const ImVec4 color = value > budget ? ImVec4{1.0f, 0.34f, 0.25f, 1.0f} :
+        value > budget * 3 / 4 ? ImVec4{1.0f, 0.78f, 0.25f, 1.0f} :
+        ImGui::GetStyleColorVec4(ImGuiCol_Text);
+    ImGui::TextColored(color, "%-12s %d / %d", label, value, budget);
+}
+
+void drawProfilerBudgetRow(
+    const char* label,
+    const EngineDiagnosticsMetricStats& stats,
+    const double budgetMs
+) {
+    const ImVec4 color = stats.average > budgetMs ? ImVec4{1.0f, 0.34f, 0.25f, 1.0f} :
+        stats.maximum > budgetMs ? ImVec4{1.0f, 0.78f, 0.25f, 1.0f} :
+        ImGui::GetStyleColorVec4(ImGuiCol_Text);
+    ImGui::TextColored(color, "%-6s %6.2f %6.2f %6.2f", label, stats.average, stats.minimum, stats.maximum);
+}
+
 }  // namespace
 
 // ── Constructor ───────────────────────────────────────────────────────────────
@@ -126,12 +159,49 @@ void GameUI::update() {
     else
         ImGui::Text("TARGET -");
     ImGui::Separator();
-    ImGui::Text("FPS    %d  (%.2f ms)", d.fps, d.frameTimeMs);
+    ImGui::Text("FPS    %d", d.fps);
+    drawBudgetTiming("FRAME", d.frameTimeMs, 16.6);
+    ImGui::Text("FRAME  %llu", static_cast<unsigned long long>(d.frameIndex));
+    drawBudgetTiming("UPDATE", d.updateMs, 8.0);
+    drawBudgetTiming("RENDER", d.renderMs, 8.0);
+    drawBudgetTiming("NET", d.networkMs, 2.0);
+    drawBudgetTiming("SIM", d.simulationMs, 4.0);
+    drawBudgetTiming("SCRIPT", d.scriptsMs, 2.0);
+    drawBudgetTiming("CHUNK", d.chunkMaintenanceMs, 3.0);
+    drawBudgetTiming("TERR", d.terrainIntegrationMs, 2.0);
+    drawBudgetTiming("MESH", d.meshBuildMs, 4.0);
+    drawBudgetTiming("READY", d.meshCompletionMs, 2.0);
+    drawBudgetTiming("UPLOAD", d.meshUploadMs, 3.0);
+    drawBudgetTiming("QUEUE", d.meshQueueMs, 1.0);
+    ImGui::Separator();
     ImGui::Text("CHUNK  %d  %d  %d", d.chunkX, d.chunkY, d.chunkZ);
     ImGui::Text("CHUNKS %d", d.loadedChunks);
+    drawBudgetQueue("TERRAIN JOBS", d.pendingTerrainJobs, 4);
+    drawBudgetQueue("MESH JOBS", d.pendingMeshJobs, 8);
+    drawBudgetQueue("MESH UPLOADS", d.pendingMeshUploads, 8);
+    drawBudgetQueue("MESH QUEUED", d.queuedMeshBuilds, 16);
+    ImGui::Text("ENTITIES     %d", d.loadedEntities);
+    ImGui::Text("PLAYERS      %d", d.connectedPlayers);
     ImGui::Text("SOLID  %d", d.solidBlocks);
     ImGui::Text("FACES  %d", d.visibleFaces);
     ImGui::Text("TRIS   %d", d.triangleCount);
+    ImGui::Separator();
+    ImGui::Text("PROFILE %zu/%zu FRAMES",
+        d.profiler.sampleCount,
+        EngineDiagnosticsRollingStats::WindowSize);
+    ImGui::Text("       avg    min    max");
+    drawProfilerBudgetRow("FRAME", d.profiler.frameDeltaMs, 16.6);
+    drawProfilerBudgetRow("UPDATE", d.profiler.updateMs, 8.0);
+    drawProfilerBudgetRow("RENDER", d.profiler.renderMs, 8.0);
+    drawProfilerBudgetRow("NET", d.profiler.networkMs, 2.0);
+    drawProfilerBudgetRow("SIM", d.profiler.simulationMs, 4.0);
+    drawProfilerBudgetRow("SCRIPT", d.profiler.scriptsMs, 2.0);
+    drawProfilerBudgetRow("CHUNK", d.profiler.chunkMaintenanceMs, 3.0);
+    drawProfilerBudgetRow("TERR", d.profiler.terrainIntegrationMs, 2.0);
+    drawProfilerBudgetRow("MESH", d.profiler.meshBuildMs, 4.0);
+    drawProfilerBudgetRow("READY", d.profiler.meshCompletionMs, 2.0);
+    drawProfilerBudgetRow("UPLOAD", d.profiler.meshUploadMs, 3.0);
+    drawProfilerBudgetRow("QUEUE", d.profiler.meshQueueMs, 1.0);
     ImGui::Separator();
     ImGui::Text("BIOME  %s", d.biomeName.empty() ? "-" : d.biomeName.c_str());
     ImGui::Text("TEMP   %.2f", d.temperature);

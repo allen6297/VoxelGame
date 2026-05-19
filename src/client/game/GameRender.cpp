@@ -98,6 +98,8 @@ void renderBlockPreviewMesh(
 }  // namespace
 
 void Game::render(const int framebufferWidth, const int framebufferHeight) const {
+    ScopedEngineTimer renderTimer(diagnostics_, EnginePhase::Render);
+
     const float aspect = framebufferHeight == 0 ? 1.0f :
         static_cast<float>(framebufferWidth) / static_cast<float>(framebufferHeight);
 
@@ -173,6 +175,8 @@ DebugOverlayData Game::getDebugData() const {
     const ClimatePoint climate = simulation_.terrainGenerator().sampleClimateAt(wx, wz);
     const BiomeDefinition* biome = simulation_.terrainGenerator().selectBiomeAt(wx, wz, gameData_.biomes);
 
+    const EngineDiagnosticsSnapshot diagnostics = diagnostics_.snapshot();
+
     return {
         player_.position,
         currentHit_.has_value() ? std::optional<Int3>(currentHit_->block) : std::nullopt,
@@ -191,7 +195,26 @@ DebugOverlayData Game::getDebugData() const {
         climate.rainfall,
         climate.elevation,
         climate.drainage,
-        climate.waterTable
+        climate.waterTable,
+        diagnostics.frameIndex,
+        diagnostics.updateMs,
+        diagnostics.renderMs,
+        diagnostics.networkMs,
+        diagnostics.simulationMs,
+        diagnostics.scriptsMs,
+        diagnostics.chunkMaintenanceMs,
+        diagnostics.terrainIntegrationMs,
+        diagnostics.meshCompletionMs,
+        diagnostics.meshBuildMs,
+        diagnostics.meshUploadMs,
+        diagnostics.meshQueueMs,
+        diagnostics.pendingTerrainJobs,
+        diagnostics.pendingMeshJobs,
+        diagnostics.pendingMeshUploads,
+        diagnostics.queuedMeshBuilds,
+        diagnostics.loadedEntities,
+        diagnostics.connectedPlayers,
+        diagnostics.rolling
     };
 }
 

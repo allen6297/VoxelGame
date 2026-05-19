@@ -2,6 +2,8 @@ add_library(voxel_core STATIC
     include/common/data/DataComponents.hpp
     src/common/data/GameData.cpp
     src/common/data/DataComponents.cpp
+    src/common/diagnostics/EngineDiagnostics.cpp
+    src/common/jobs/JobSystem.cpp
     src/common/data/JsonValue.cpp
     src/common/pack/Pack.cpp
     src/common/pack/PackManager.cpp
@@ -203,6 +205,11 @@ target_compile_definitions(TerraliteNetworkConnectionTests PRIVATE
     TERRALITE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
 )
 
+add_executable(TerraliteJobSystemTests
+    tests/JobSystemTests.cpp
+)
+target_link_libraries(TerraliteJobSystemTests PRIVATE voxel_core)
+
 # ── Code generation ───────────────────────────────────────────────────────────
 find_program(NODEJS node)
 if(NODEJS)
@@ -236,3 +243,4 @@ add_test(NAME TerraliteDataTests COMMAND $<TARGET_FILE:TerraliteDataTests>)
 add_test(NAME TerraliteDataComponentTests COMMAND $<TARGET_FILE:TerraliteDataComponentTests>)
 add_test(NAME TerraliteLauncherCoreTests COMMAND $<TARGET_FILE:TerraliteLauncherCoreTests>)
 add_test(NAME TerraliteNetworkConnectionTests COMMAND $<TARGET_FILE:TerraliteNetworkConnectionTests>)
+add_test(NAME TerraliteJobSystemTests COMMAND $<TARGET_FILE:TerraliteJobSystemTests>)

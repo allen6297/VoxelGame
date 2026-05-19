@@ -1,9 +1,11 @@
 #pragma once
 
+#include <cstdint>
 #include <optional>
 #include <string>
 
 #include "data/GameData.hpp"
+#include "diagnostics/EngineDiagnostics.hpp"
 #include "Player.hpp"
 #include "player/Inventory.hpp"
 #include "world/World.hpp"
@@ -39,6 +41,27 @@ struct DebugOverlayData {
     float elevation   = 0.0f;
     float drainage    = 0.0f;
     float waterTable  = 0.0f;
+
+    // Engine diagnostics
+    std::uint64_t frameIndex = 0;
+    double updateMs = 0.0;
+    double renderMs = 0.0;
+    double networkMs = 0.0;
+    double simulationMs = 0.0;
+    double scriptsMs = 0.0;
+    double chunkMaintenanceMs = 0.0;
+    double terrainIntegrationMs = 0.0;
+    double meshCompletionMs = 0.0;
+    double meshBuildMs = 0.0;
+    double meshUploadMs = 0.0;
+    double meshQueueMs = 0.0;
+    int pendingTerrainJobs = 0;
+    int pendingMeshJobs = 0;
+    int pendingMeshUploads = 0;
+    int queuedMeshBuilds = 0;
+    int loadedEntities = 0;
+    int connectedPlayers = 0;
+    EngineDiagnosticsRollingStats profiler;
 };
 
 void setPerspective(float fovYDegrees, float aspect, float nearPlane, float farPlane);

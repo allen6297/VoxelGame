@@ -8,8 +8,10 @@
 #include <vector>
 
 #include "data/GameData.hpp"
+#include "diagnostics/EngineDiagnostics.hpp"
 #include "ecs/EntitySystem.hpp"
 #include "Input.hpp"
+#include "jobs/JobSystem.hpp"
 #include "network/NetworkManager.hpp"
 #include "Player.hpp"
 #include "render/Mesh.hpp"
@@ -41,6 +43,8 @@ public:
     const ecs::EntitySystem& entitySystem() const { return entitySystem_; }
     WorldSimulation& simulation() { return simulation_; }
     const WorldSimulation& simulation() const { return simulation_; }
+    EngineDiagnostics& diagnostics() { return diagnostics_; }
+    const EngineDiagnostics& diagnostics() const { return diagnostics_; }
 
 private:
     struct PendingMesh {
@@ -75,6 +79,7 @@ private:
     void launchMeshBuild(const ChunkCoord& coord);
     void collectPending(const ChunkCoord& playerChunk);
     void discardPendingMeshUpload(const ChunkCoord& coord);
+    void waitForPendingJobs();
     void applyNetworkBlockChanges();
     void applyNetworkEntityChanges();
     void reloadGameData();
@@ -108,6 +113,8 @@ private:
     int fpsFrameCount_ = 0;
     int fps_ = 0;
     float frameTimeMs_ = 0.0f;
+    mutable EngineDiagnostics diagnostics_;
+    JobSystem jobSystem_;
     std::mt19937 rng_ {std::random_device{}()};
 };
 }  // namespace voxel

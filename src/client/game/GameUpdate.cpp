@@ -32,7 +32,11 @@ bool receivesAuthoritativeChunks(const NetworkManager* network) {
 }  // namespace
 
 void Game::update(const ClientInputFrame& input, const float deltaTime) {
+    diagnostics_.beginFrame(static_cast<double>(deltaTime) * 1000.0);
+    ScopedEngineTimer updateTimer(diagnostics_, EnginePhase::Update);
+
     if (network_ != nullptr) {
+        ScopedEngineTimer networkTimer(diagnostics_, EnginePhase::Network);
         network_->poll();
         applyNetworkBlockChanges();
         applyNetworkEntityChanges();
@@ -67,10 +71,13 @@ void Game::update(const ClientInputFrame& input, const float deltaTime) {
     handleInventorySelection(input);
     jump(player_, input_);
     updateMovement(input, simulation_.world(), gameData_, player_, deltaTime);
-    entitySystem_.update(deltaTime);
-    if (!receivesAuthoritativeChunks(network_)) {
-        simulateLiquids(deltaTime);
-        processBlockTicks();
+    {
+        ScopedEngineTimer simulationTimer(diagnostics_, EnginePhase::Simulation);
+        entitySystem_.update(deltaTime);
+        if (!receivesAuthoritativeChunks(network_)) {
+            simulateLiquids(deltaTime);
+            processBlockTicks();
+        }
     }
 
     currentHit_ = raycastWorld(simulation_.world(), gameData_, getEyePosition(player_), getLookDirection(player_));
@@ -86,7 +93,19 @@ void Game::update(const ClientInputFrame& input, const float deltaTime) {
     }
     f5WasPressed_ = f5Now;
 
-    updateLoadedChunks(playerChunk);
+    {
+        ScopedEngineTimer chunkTimer(diagnostics_, EnginePhase::ChunkMaintenance);
+        updateLoadedChunks(playerChunk);
+    }
+    diagnostics_.setChunkGauges(
+        static_cast<int>(simulation_.world().chunks.size()),
+        static_cast<int>(pendingTerrain_.size()),
+        static_cast<int>(pendingMeshes_.size()),
+        static_cast<int>(pendingMeshUploads_.size()),
+        static_cast<int>(queuedMeshBuilds_.size())
+    );
+    diagnostics_.setEntityGauge(static_cast<int>(simulation_.entities().size()));
+    diagnostics_.setPlayerGauge(network_ != nullptr ? static_cast<int>(network_->remotePlayers().size()) : 0);
 }
 
 void Game::applyNetworkBlockChanges() {
@@ -222,83 +241,92 @@ void Game::applyNetworkEntityChanges() {
 
 void Game::collectPending(const ChunkCoord& playerChunk) {
     int terrainIntegrations = 0;
-    for (auto it = pendingTerrain_.begin(); it != pendingTerrain_.end();) {
-        if (it->second.wait_for(std::chrono::seconds(0)) == std::future_status::ready) {
-            const ChunkCoord coord = it->first;
-            const bool shouldKeep = isWithinUnloadDistance(coord, playerChunk);
-            if (shouldKeep && terrainIntegrations >= kMaxTerrainIntegrationsPerFrame) {
-                break;
+    {
+        ScopedEngineTimer terrainTimer(diagnostics_, EnginePhase::TerrainIntegration);
+        for (auto it = pendingTerrain_.begin(); it != pendingTerrain_.end();) {
+            if (it->second.wait_for(std::chrono::seconds(0)) == std::future_status::ready) {
+                const ChunkCoord coord = it->first;
+                const bool shouldKeep = isWithinUnloadDistance(coord, playerChunk);
+                if (shouldKeep && terrainIntegrations >= kMaxTerrainIntegrationsPerFrame) {
+                    break;
+                }
+                Chunk chunk = it->second.get();
+                it = pendingTerrain_.erase(it);
+                if (shouldKeep) {
+                    simulation_.world().chunks[coord] = std::move(chunk);
+                    scheduleChunkBlockTicks(simulation_.world().chunks[coord]);
+                    launchMeshBuild(coord);
+                    ++terrainIntegrations;
+                }
+            } else {
+                ++it;
             }
-            Chunk chunk = it->second.get();
-            it = pendingTerrain_.erase(it);
-            if (shouldKeep) {
-                simulation_.world().chunks[coord] = std::move(chunk);
-                scheduleChunkBlockTicks(simulation_.world().chunks[coord]);
-                launchMeshBuild(coord);
-                ++terrainIntegrations;
-            }
-        } else {
-            ++it;
         }
     }
 
-    int uploadedSurfaces = 0;
-    std::size_t uploadedVertices = 0;
-    while (!pendingMeshUploads_.empty() && uploadedSurfaces < kMaxMeshUploadSurfacesPerFrame) {
-        PendingMeshUpload& upload = pendingMeshUploads_.front();
-        const bool shouldKeep = chunkLoaded(simulation_.world(), upload.coord) &&
-            isWithinUnloadDistance(upload.coord, playerChunk) &&
-            meshes_.find(upload.coord) == meshes_.end();
-        if (!shouldKeep) {
-            renderBackend_.destroyChunkMesh(upload.mesh);
-            pendingMeshUploads_.pop_front();
-            continue;
-        }
+    {
+        ScopedEngineTimer uploadTimer(diagnostics_, EnginePhase::MeshUpload);
+        int uploadedSurfaces = 0;
+        std::size_t uploadedVertices = 0;
+        while (!pendingMeshUploads_.empty() && uploadedSurfaces < kMaxMeshUploadSurfacesPerFrame) {
+            PendingMeshUpload& upload = pendingMeshUploads_.front();
+            const bool shouldKeep = chunkLoaded(simulation_.world(), upload.coord) &&
+                isWithinUnloadDistance(upload.coord, playerChunk) &&
+                meshes_.find(upload.coord) == meshes_.end();
+            if (!shouldKeep) {
+                renderBackend_.destroyChunkMesh(upload.mesh);
+                pendingMeshUploads_.pop_front();
+                continue;
+            }
 
-        while (upload.nextSurface < upload.mesh.surfaces.size() &&
-               upload.mesh.surfaces[upload.nextSurface].vertices.empty()) {
+            while (upload.nextSurface < upload.mesh.surfaces.size() &&
+                   upload.mesh.surfaces[upload.nextSurface].vertices.empty()) {
+                ++upload.nextSurface;
+            }
+
+            if (upload.nextSurface >= upload.mesh.surfaces.size()) {
+                meshes_[upload.coord] = std::move(upload.mesh);
+                pendingMeshUploads_.pop_front();
+                continue;
+            }
+
+            const std::size_t surfaceVertices = upload.mesh.surfaces[upload.nextSurface].vertices.size();
+            if (uploadedSurfaces > 0 && uploadedVertices + surfaceVertices > kMaxMeshUploadVerticesPerFrame) {
+                break;
+            }
+
+            if (renderBackend_.uploadChunkMeshSurface(upload.mesh, upload.nextSurface)) {
+                ++uploadedSurfaces;
+                uploadedVertices += surfaceVertices;
+            }
             ++upload.nextSurface;
         }
-
-        if (upload.nextSurface >= upload.mesh.surfaces.size()) {
-            meshes_[upload.coord] = std::move(upload.mesh);
-            pendingMeshUploads_.pop_front();
-            continue;
-        }
-
-        const std::size_t surfaceVertices = upload.mesh.surfaces[upload.nextSurface].vertices.size();
-        if (uploadedSurfaces > 0 && uploadedVertices + surfaceVertices > kMaxMeshUploadVerticesPerFrame) {
-            break;
-        }
-
-        if (renderBackend_.uploadChunkMeshSurface(upload.mesh, upload.nextSurface)) {
-            ++uploadedSurfaces;
-            uploadedVertices += surfaceVertices;
-        }
-        ++upload.nextSurface;
     }
 
-    int meshUploads = 0;
-    for (auto it = pendingMeshes_.begin(); it != pendingMeshes_.end();) {
-        if (it->future.wait_for(std::chrono::seconds(0)) == std::future_status::ready) {
-            const ChunkCoord coord = it->coord;
-            const bool shouldUpload = chunkLoaded(simulation_.world(), coord) && isWithinUnloadDistance(coord, playerChunk);
-            if (shouldUpload && meshUploads >= kMaxMeshUploadsPerFrame) {
-                break;
-            }
-            ChunkMesh mesh = it->future.get();
-            it = pendingMeshes_.erase(it);
-            if (shouldUpload) {
-                const auto existing = meshes_.find(coord);
-                if (existing != meshes_.end()) {
-                    renderBackend_.destroyChunkMesh(mesh);
-                    continue;
+    {
+        ScopedEngineTimer meshCompletionTimer(diagnostics_, EnginePhase::MeshCompletion);
+        int meshUploads = 0;
+        for (auto it = pendingMeshes_.begin(); it != pendingMeshes_.end();) {
+            if (it->future.wait_for(std::chrono::seconds(0)) == std::future_status::ready) {
+                const ChunkCoord coord = it->coord;
+                const bool shouldUpload = chunkLoaded(simulation_.world(), coord) && isWithinUnloadDistance(coord, playerChunk);
+                if (shouldUpload && meshUploads >= kMaxMeshUploadsPerFrame) {
+                    break;
                 }
-                pendingMeshUploads_.push_back({coord, std::move(mesh), 0});
-                ++meshUploads;
+                ChunkMesh mesh = it->future.get();
+                it = pendingMeshes_.erase(it);
+                if (shouldUpload) {
+                    const auto existing = meshes_.find(coord);
+                    if (existing != meshes_.end()) {
+                        renderBackend_.destroyChunkMesh(mesh);
+                        continue;
+                    }
+                    pendingMeshUploads_.push_back({coord, std::move(mesh), 0});
+                    ++meshUploads;
+                }
+            } else {
+                ++it;
             }
-        } else {
-            ++it;
         }
     }
 
@@ -319,6 +347,16 @@ void Game::discardPendingMeshUpload(const ChunkCoord& coord) {
         } else {
             ++it;
         }
+    }
+}
+
+void Game::waitForPendingJobs() {
+    for (auto& [coord, future] : pendingTerrain_) {
+        (void)coord;
+        future.wait();
+    }
+    for (PendingMesh& pendingMesh : pendingMeshes_) {
+        pendingMesh.future.wait();
     }
 }
 
@@ -420,6 +458,8 @@ void Game::scheduleChunkBlockTicks(const Chunk& chunk) {
 }
 
 void Game::launchMeshBuild(const ChunkCoord& coord) {
+    ScopedEngineTimer meshQueueTimer(diagnostics_, EnginePhase::MeshQueue);
+
     if (std::any_of(pendingMeshes_.begin(), pendingMeshes_.end(),
             [&coord](const PendingMesh& pm) { return pm.coord == coord; })) {
         return;
@@ -446,7 +486,7 @@ void Game::launchMeshBuild(const ChunkCoord& coord) {
         }
     }
 
-    pendingMeshes_.push_back({coord, std::async(std::launch::async,
+    pendingMeshes_.push_back({coord, jobSystem_.submit(JobPriority::Normal,
         [coord, snapshot, &gd = gameData_, &mm = modelManager_]() {
             const Chunk* neighbors[27];
             for (int i = 0; i < 27; ++i) neighbors[i] = snapshot[i];
@@ -549,7 +589,7 @@ void Game::updateLoadedChunks(const ChunkCoord& playerChunk) {
                     if (pendingTerrain_.find(coord) != pendingTerrain_.end()) continue;
 
                     const TerrainGenerator gen = simulation_.terrainGenerator();
-                    pendingTerrain_[coord] = std::async(std::launch::async,
+                    pendingTerrain_[coord] = jobSystem_.submit(JobPriority::Low,
                         [coord, gen, &gd = gameData_]() {
                             return gen.generateChunk(coord, gd);
                         }

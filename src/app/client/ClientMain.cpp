@@ -257,7 +257,10 @@ int main(int argc, char** argv) {
             const voxel::ClientInputFrame inputFrame = inputCollector.poll(window.handle());
             game.update(inputFrame, deltaTime);
 
-            runtimeBridge.tick(deltaTime);
+            {
+                voxel::ScopedEngineTimer scriptsTimer(game.diagnostics(), voxel::EnginePhase::Scripts);
+                runtimeBridge.tick(deltaTime);
+            }
 
             // Sync world time from network
             if (auto time = network.takePendingWorldTime()) {
